@@ -107,6 +107,7 @@ juce_add_plugin(SecondOpinion
 target_sources(SecondOpinion PRIVATE
     src/plugin/Parameters.cpp
     src/plugin/PluginProcessor.cpp
+    src/plugin/AudioFileLoader.cpp
     src/plugin/PluginEditor.cpp
     src/bridge/WebBridge.cpp
     src/bridge/NativeDragStrip.cpp)
