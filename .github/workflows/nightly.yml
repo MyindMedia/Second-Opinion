@@ -86,8 +86,11 @@ jobs:
         run: |
           Invoke-WebRequest https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Windows.zip -OutFile pluginval.zip
           Expand-Archive pluginval.zip -DestinationPath .
-          ./pluginval.exe --strictness-level 10 --validate-in-process --timeout-ms 600000 --output-dir pluginval-logs --validate "build/${{ matrix.preset }}/SecondOpinion_artefacts/${{ matrix.config }}/VST3/Second Opinion.vst3"
-          if ($LASTEXITCODE -ne 0) { exit 1 }
+          # pluginval.exe is a GUI-subsystem app: call it through Start-Process -Wait to get its real exit code.
+          $args = @('--strictness-level', '10', '--validate-in-process', '--timeout-ms', '600000', '--output-dir', 'pluginval-logs', '--validate', '"build/${{ matrix.preset }}/SecondOpinion_artefacts/${{ matrix.config }}/VST3/Second Opinion.vst3"')
+          $p = Start-Process -FilePath ./pluginval.exe -ArgumentList $args -NoNewWindow -Wait -PassThru
+          Write-Host ("pluginval exit code: {0} (0x{0:X8})" -f $p.ExitCode)
+          if ($p.ExitCode -ne 0) { exit 1 }
 
       - name: Upload pluginval logs
         if: always()

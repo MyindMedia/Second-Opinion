@@ -135,8 +135,11 @@ jobs:
         run: |
           Invoke-WebRequest https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Windows.zip -OutFile pluginval.zip
           Expand-Archive pluginval.zip -DestinationPath .
-          ./pluginval.exe --strictness-level $env:PLUGINVAL_STRICTNESS --validate-in-process --validate "build/win-x64-release/SecondOpinion_artefacts/Release/VST3/Second Opinion.vst3"
-          if ($LASTEXITCODE -ne 0) { exit 1 }
+          # pluginval.exe is a GUI-subsystem app: call it through Start-Process -Wait to get its real exit code.
+          $args = @('--strictness-level', $env:PLUGINVAL_STRICTNESS, '--validate-in-process', '--validate', '"build/win-x64-release/SecondOpinion_artefacts/Release/VST3/Second Opinion.vst3"')
+          $p = Start-Process -FilePath ./pluginval.exe -ArgumentList $args -NoNewWindow -Wait -PassThru
+          Write-Host ("pluginval exit code: {0} (0x{0:X8})" -f $p.ExitCode)
+          if ($p.ExitCode -ne 0) { exit 1 }
 
       - name: pluginval (Linux)
         if: runner.os == 'Linux'
