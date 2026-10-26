@@ -157,6 +157,9 @@ juce_add_plugin(SecondOpinion
     AU_MAIN_TYPE kAudioUnitType_Effect
     COPY_PLUGIN_AFTER_BUILD ${SO_COPY_PLUGIN}
     NEEDS_WEB_BROWSER TRUE
+    # macOS Standalone: NSMicrophoneUsageDescription, required to read the audio input at all.
+    MICROPHONE_PERMISSION_ENABLED TRUE
+    MICROPHONE_PERMISSION_TEXT "Second Opinion listens to the audio input to read the chords you play."
     ${SO_WEBVIEW2_ARG})
 
 target_sources(SecondOpinion PRIVATE

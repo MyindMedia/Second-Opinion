@@ -1,0 +1,169 @@
+name: Release
+
+# Builds Release on macOS (universal) and Windows (x64), packages a .pkg and an Inno Setup
+# installer, and attaches them to a draft GitHub release. Signing and notarization run only when
+# the secrets exist; otherwise the packages are unsigned (see docs/RELEASING.md).
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # create the draft release
+
+env:
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-cache
+
+jobs:
+  macos:
+    name: macOS package
+    runs-on: macos-14
+    timeout-minutes: 150
+    env:
+      APPLE_DEVELOPER_ID_APPLICATION: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION }}
+      APPLE_DEVELOPER_ID_INSTALLER: ${{ secrets.APPLE_DEVELOPER_ID_INSTALLER }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY }}
+      APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+      APPLE_NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER }}
+      APPLE_CERTIFICATES_P12: ${{ secrets.APPLE_CERTIFICATES_P12 }}
+      APPLE_CERTIFICATES_PASSWORD: ${{ secrets.APPLE_CERTIFICATES_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { lfs: true }
+
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: ui/package-lock.json }
+
+      - uses: actions/cache@v4
+        with:
+          path: .cpm-cache
+          key: cpm-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cmake/OnnxRuntime.cmake') }}
+          restore-keys: cpm-${{ runner.os }}-
+
+      - name: Version from tag
+        id: ver
+        shell: bash
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]] || v="$(sed -nE 's/^project\(SecondOpinion VERSION ([0-9.]+).*/\1/p' CMakeLists.txt)"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          cmake_v="$(sed -nE 's/^project\(SecondOpinion VERSION ([0-9.]+).*/\1/p' CMakeLists.txt)"
+          [ "$v" = "$cmake_v" ] || echo "::warning::Tag version $v differs from CMakeLists.txt ($cmake_v); the plugin reports $cmake_v"
+
+      - name: Configure
+        run: cmake --preset mac-universal-release -DSO_BUILD_TESTS=OFF -DSO_COPY_PLUGIN=OFF
+      - name: Build
+        run: cmake --build --preset mac-universal-release --parallel
+
+      - name: Import signing certificates
+        if: env.APPLE_CERTIFICATES_P12 != ''
+        run: |
+          kc="$RUNNER_TEMP/signing.keychain-db"
+          kc_pass="$(uuidgen)"
+          echo "$APPLE_CERTIFICATES_P12" | base64 --decode > "$RUNNER_TEMP/certs.p12"
+          security create-keychain -p "$kc_pass" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$kc_pass" "$kc"
+          security import "$RUNNER_TEMP/certs.p12" -k "$kc" -P "$APPLE_CERTIFICATES_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/productbuild -T /usr/bin/pkgbuild
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$kc_pass" "$kc" > /dev/null
+          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/certs.p12"
+
+      - name: Package (.pkg)
+        env:
+          SO_VERSION: ${{ steps.ver.outputs.version }}
+        run: packaging/macos/build_pkg.sh build/mac-universal-release/SecondOpinion_artefacts/Release build/packages
+
+      - name: Size report (NFR-09, budget 60 MB per format)
+        run: du -sh build/mac-universal-release/SecondOpinion_artefacts/Release/*/* build/packages/* || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SecondOpinion-macOS-${{ steps.ver.outputs.version }}
+          path: build/packages/*.pkg
+          if-no-files-found: error
+
+      - name: Clean up keychain
+        if: always() && env.APPLE_CERTIFICATES_P12 != ''
+        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
+
+  windows:
+    name: Windows installer
+    runs-on: windows-latest
+    timeout-minutes: 150
+    env:
+      WIN_SIGN_PFX_BASE64: ${{ secrets.WIN_SIGN_PFX_BASE64 }}
+      WIN_SIGN_PFX_PASSWORD: ${{ secrets.WIN_SIGN_PFX_PASSWORD }}
+      WIN_SIGN_TIMESTAMP_URL: ${{ vars.WIN_SIGN_TIMESTAMP_URL }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { lfs: true }
+
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: ui/package-lock.json }
+
+      - uses: actions/cache@v4
+        with:
+          path: .cpm-cache
+          key: cpm-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cmake/OnnxRuntime.cmake') }}
+          restore-keys: cpm-${{ runner.os }}-
+
+      - name: Version from tag
+        id: ver
+        shell: bash
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]] || v="$(sed -nE 's/^project\(SecondOpinion VERSION ([0-9.]+).*/\1/p' CMakeLists.txt)"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: WebView2 SDK (static linking, NEEDS_WEBVIEW2)
+        shell: pwsh
+        run: |
+          Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Scope CurrentUser -Force | Out-Null
+          Register-PackageSource -ProviderName NuGet -Name nugetRepository -Location https://www.nuget.org/api/v2 -Force -ErrorAction SilentlyContinue
+          Install-Package Microsoft.Web.WebView2 -Scope CurrentUser -RequiredVersion 1.0.3485.44 -Source nugetRepository -Force
+
+      - name: Configure
+        run: cmake --preset win-x64-release -DSO_BUILD_TESTS=OFF
+      - name: Build
+        run: cmake --build --preset win-x64-release --parallel
+
+      - name: Inno Setup present
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+
+      - name: Package (Inno Setup)
+        shell: pwsh
+        env:
+          SO_VERSION: ${{ steps.ver.outputs.version }}
+        run: ./packaging/windows/build_installer.ps1
+
+      - name: Size report (NFR-09, budget 60 MB per format)
+        shell: bash
+        run: du -sh build/win-x64-release/SecondOpinion_artefacts/Release/*/* build/packages/* || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SecondOpinion-Windows-${{ steps.ver.outputs.version }}
+          path: build/packages/*.exe
+          if-no-files-found: error
+
+  draft-release:
+    name: Draft GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: dist, merge-multiple: true }
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la dist
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --draft \
+            --title "Second Opinion ${GITHUB_REF_NAME#v}" --notes "Draft. Check signing status in docs/RELEASING.md before publishing."
