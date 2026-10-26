@@ -56,7 +56,14 @@ add_library(so_core STATIC
     src/core/theory/Key.cpp
     src/core/theory/RomanNumeral.cpp
     src/core/midi/MidiWriter.cpp
-    src/core/midi/SimpleVoicer.cpp)
+    src/core/midi/SimpleVoicer.cpp
+    src/core/reharm/Harmony.cpp
+    src/core/reharm/CandidateGenerator.cpp
+    src/core/reharm/VoiceLeadingSolver.cpp
+    src/core/reharm/BassGenerator.cpp
+    src/core/reharm/Explainer.cpp
+    src/core/reharm/Ranker.cpp
+    src/core/reharm/Reharmonizer.cpp)
 target_include_directories(so_core PUBLIC src)
 so_set_warnings(so_core)
 
