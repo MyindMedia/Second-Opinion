@@ -1,0 +1,16 @@
+# Build output
+build/
+.cpm-cache/
+cmake-build-*/
+out/
+
+# UI
+ui/node_modules/
+ui/dist/
+
+# IDEs and OS
+.vscode/
+.idea/
+*.xcworkspace/xcuserdata/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,9 @@
+* text=auto eol=lf
+*.bat text eol=crlf
+*.onnx filter=lfs diff=lfs merge=lfs -text
+tests/fixtures/*.wav filter=lfs diff=lfs merge=lfs -text
+*.woff2 binary
+*.png binary
+*.onnx !text !filter !merge !diff
+tests/fixtures/*.wav !text !filter !merge !diff
+tests/fixtures/eval/*.wav !text !filter !merge !diff
