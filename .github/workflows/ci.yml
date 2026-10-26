@@ -1,0 +1,135 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-cache
+  PLUGINVAL_STRICTNESS: 5
+
+jobs:
+  ui:
+    name: UI (typecheck + tests)
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: ui } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: ui/package-lock.json }
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: No external URLs in the built UI (FR-UX-01)
+        run: |
+          # The SVG XML namespace (www.w3.org/2000/svg) is an identifier, never fetched.
+          found=$(grep -RhoP "https?://[^\s\"')<>]+" dist | grep -v "^http://www.w3.org/2000/svg$" || true)
+          if [ -n "$found" ]; then echo "::error::External URLs in ui/dist: $found"; exit 1; fi
+
+  build:
+    name: ${{ matrix.name }}
+    needs: ui
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (universal)
+            os: macos-14
+            preset: mac-universal
+          - name: Windows (x64)
+            os: windows-latest
+            preset: win-x64
+          - name: Linux (dev check)
+            os: ubuntu-24.04
+            preset: linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { lfs: true }
+
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: ui/package-lock.json }
+
+      - uses: actions/cache@v4
+        with:
+          path: .cpm-cache
+          key: cpm-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
+
+      - name: Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ninja-build libwebkit2gtk-4.1-dev libgtk-3-dev libasound2-dev \
+            libcurl4-openssl-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxcomposite-dev xvfb
+
+      - name: WebView2 SDK (static linking, NEEDS_WEBVIEW2)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Register-PackageSource -ProviderName NuGet -Name nugetRepository -Location https://www.nuget.org/api/v2 -Force -ErrorAction SilentlyContinue
+          Install-Package Microsoft.Web.WebView2 -Scope CurrentUser -RequiredVersion 1.0.1901.177 -Source nugetRepository -Force
+
+      # ---- Debug: unit + real-time safety tests
+      - name: Configure (Debug)
+        run: cmake --preset ${{ matrix.preset }}-debug
+      - name: Build (Debug)
+        run: cmake --build --preset ${{ matrix.preset }}-debug --parallel
+      - name: Test (Debug)
+        run: ctest --preset ${{ matrix.preset }}-debug
+
+      # ---- Release: tests + plugin validation
+      - name: Configure (Release)
+        run: cmake --preset ${{ matrix.preset }}-release
+      - name: Build (Release)
+        run: cmake --build --preset ${{ matrix.preset }}-release --parallel
+      - name: Test (Release)
+        run: ctest --preset ${{ matrix.preset }}-release
+
+      - name: pluginval (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          curl -sSL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_macOS.zip
+          unzip -q pluginval.zip
+          ./pluginval.app/Contents/MacOS/pluginval --strictness-level $PLUGINVAL_STRICTNESS --validate-in-process \
+            --validate "build/mac-universal-release/SecondOpinion_artefacts/Release/VST3/Second Opinion.vst3"
+
+      - name: auval (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          # SO_COPY_PLUGIN=ON in the mac preset installs the AU into ~/Library/Audio/Plug-Ins/Components
+          killall -9 AudioComponentRegistrar || true
+          auval -a | grep -i "Brmt" || true
+          auval -v aufx SOp1 Brmt
+
+      - name: pluginval (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Windows.zip -OutFile pluginval.zip
+          Expand-Archive pluginval.zip -DestinationPath .
+          ./pluginval.exe --strictness-level $env:PLUGINVAL_STRICTNESS --validate-in-process --validate "build/win-x64-release/SecondOpinion_artefacts/Release/VST3/Second Opinion.vst3"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: pluginval (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          curl -sSL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Linux.zip
+          unzip -q pluginval.zip
+          xvfb-run -a ./pluginval --strictness-level $PLUGINVAL_STRICTNESS --validate-in-process \
+            --validate "build/linux-release/SecondOpinion_artefacts/Release/VST3/Second Opinion.vst3"
+
+      - name: Upload plugins
+        uses: actions/upload-artifact@v4
+        with:
+          name: SecondOpinion-${{ matrix.preset }}
+          path: |
+            build/${{ matrix.preset }}-release/SecondOpinion_artefacts/Release/VST3
+            build/${{ matrix.preset }}-release/SecondOpinion_artefacts/Release/AU
+            build/${{ matrix.preset }}-release/SecondOpinion_artefacts/Release/Standalone
+          if-no-files-found: warn
