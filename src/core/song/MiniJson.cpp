@@ -1,4 +1,5 @@
 #include "MiniJson.h"
+#include "LocaleFreeNumber.h"
 
 #include <cmath>
 #include <cstdio>
@@ -155,10 +156,9 @@ namespace
                     ++pos;
                 if (pos == start) return std::nullopt;
                 const std::string num (s.substr (start, pos - start));
-                char* end = nullptr;
-                const double d = std::strtod (num.c_str(), &end);
-                if (end == nullptr || *end != '\0' || ! std::isfinite (d)) return std::nullopt;
-                result = Value::makeNumber (d);
+                const auto d = so::text::parseDouble (num);
+                if (! d) return std::nullopt;
+                result = Value::makeNumber (*d);
             }
 
             --depth;
@@ -184,9 +184,7 @@ namespace
     {
         if (std::fabs (d - std::round (d)) < 1e-9)
             return std::to_string ((long long) std::llround (d));
-        char buf[32];
-        std::snprintf (buf, sizeof (buf), "%.3f", d);
-        std::string out (buf);
+        std::string out = so::text::formatFixed (d, 3);
         while (! out.empty() && out.back() == '0') out.pop_back();
         if (! out.empty() && out.back() == '.') out.pop_back();
         if (out == "-0") out = "0";

@@ -8,6 +8,7 @@
 #include "bridge/Json.h"
 #include "core/analysis/Analyzer.h"
 #include "core/analysis/TempoEstimator.h"
+#include "core/song/LocaleFreeNumber.h"
 #include "core/reharm/Reharmonizer.h"
 #include "core/theory/ChordNamer.h"
 #include "core/theory/ChordSymbolParser.h"
@@ -981,9 +982,7 @@ namespace
     // Every number is written by hand: %.17g round-trips doubles exactly, JUCE's var does not above 1e6.
     juce::String num (double v)
     {
-        char buf[40];
-        std::snprintf (buf, sizeof (buf), "%.17g", v);
-        return juce::String (buf);
+        return juce::String (so::text::formatRoundTrip (v));
     }
 
     std::optional<double> readNum (const juce::ValueTree& t, const juce::Identifier& id)

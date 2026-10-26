@@ -1,6 +1,7 @@
 #include "SongBuilder.h"
 
 #include "../theory/ChordNamer.h"
+#include "LocaleFreeNumber.h"
 
 #include <algorithm>
 #include <array>
@@ -303,7 +304,7 @@ namespace
         double mult = 1.0;
         if (const auto colon = tok.find (':'); colon != std::string_view::npos)
         {
-            mult = std::atof (std::string (tok.substr (colon + 1)).c_str());
+            mult = so::text::parseDouble (tok.substr (colon + 1)).value_or (0.0);
             tok = tok.substr (0, colon);
             if (mult <= 0.0) return std::nullopt;
         }
@@ -1443,9 +1444,8 @@ namespace
         }
         if (verseE >= 0 && chorusE >= 0)
         {
-            char buf[96];
-            std::snprintf (buf, sizeof (buf), " Energy climbs from %.2f in the verse to %.2f in the chorus", (double) verseE, (double) chorusE);
-            a += buf;
+            a += " Energy climbs from " + so::text::formatFixed (verseE, 2) + " in the verse to "
+                 + so::text::formatFixed (chorusE, 2) + " in the chorus";
             a += keyUp ? ", the last chorus jumps up a key, and the outro resolves home." : ", and the outro resolves home.";
         }
         return a;

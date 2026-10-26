@@ -135,3 +135,32 @@ TEST_CASE ("MiniJson basics", "[song][json]")
     CHECK_FALSE (json::parse ("{\"a\": 1,}").has_value());
     CHECK_FALSE (json::parse ("1 2").has_value());
 }
+
+#include "core/song/LocaleFreeNumber.h"
+
+#include <locale>
+
+namespace
+{
+    struct CommaDecimal : std::numpunct<char>
+    {
+        char do_decimal_point() const override { return ','; }
+        char do_thousands_sep() const override { return '.'; }
+        std::string do_grouping() const override { return "\3"; }
+    };
+}
+
+TEST_CASE ("Number text conversions ignore a comma-decimal locale", "[song][json]")
+{
+    const auto previous = std::locale::global (std::locale (std::locale::classic(), new CommaDecimal));
+
+    CHECK (so::text::parseDouble ("0.5").value_or (-1.0) == 0.5);
+    CHECK (so::text::parseDouble ("-1.25e2").value_or (0.0) == -125.0);
+    CHECK_FALSE (so::text::parseDouble ("0,5").has_value());
+    CHECK_FALSE (so::text::parseDouble ("").has_value());
+    CHECK_FALSE (so::text::parseDouble ("1.5x").has_value());
+    CHECK (so::text::formatFixed (1234.5, 3) == "1234.500");
+    CHECK (so::text::formatRoundTrip (0.1) == "0.10000000000000001");
+
+    std::locale::global (previous);
+}
