@@ -3,6 +3,8 @@
 #include "core/analysis/TempoEstimator.h"
 
 #include <cmath>
+#include <cstdint>
+#include <numbers>
 #include <random>
 
 using namespace so::analysis;
@@ -32,9 +34,9 @@ namespace
                 const double env = std::exp (-tt * 14.0);
                 double v = 0.0;
                 for (double f : { 349.2, 415.3, 523.3 })   // F Ab C
-                    v += 0.12 * std::sin (2.0 * M_PI * f * tt);
+                    v += 0.12 * std::sin (2.0 * std::numbers::pi * f * tt);
                 if (downbeat)
-                    v += 0.6 * std::sin (2.0 * M_PI * 55.0 * tt) * std::exp (-tt * 9.0);
+                    v += 0.6 * std::sin (2.0 * std::numbers::pi * 55.0 * tt) * std::exp (-tt * 9.0);
                 c.samples[start + i] += (float) (v * env);
             }
         }

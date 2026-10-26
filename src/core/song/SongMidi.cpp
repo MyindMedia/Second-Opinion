@@ -1,5 +1,7 @@
 #include "SongMidi.h"
 
+#include <algorithm>
+
 namespace so::song
 {
 

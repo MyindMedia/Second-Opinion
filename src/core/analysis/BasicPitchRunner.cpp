@@ -46,16 +46,6 @@ namespace
     using GetApiBaseFn = const OrtApiBase* (ORT_API_CALL*) ();
 
 #if defined(_WIN32)
-    std::wstring widen (const std::string& utf8)
-    {
-        if (utf8.empty())
-            return {};
-        const int n = MultiByteToWideChar (CP_UTF8, 0, utf8.data(), (int) utf8.size(), nullptr, 0);
-        std::wstring w ((std::size_t) n, L'\0');
-        MultiByteToWideChar (CP_UTF8, 0, utf8.data(), (int) utf8.size(), w.data(), n);
-        return w;
-    }
-
     /** Directory of the module (plugin DLL or test exe) that contains this code. */
     std::filesystem::path thisModuleDirectory()
     {
