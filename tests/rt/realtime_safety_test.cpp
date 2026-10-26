@@ -5,46 +5,34 @@
 #include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include "RtTestSupport.h"
 #include "plugin/PluginProcessor.h"
 
 #include <atomic>
 #include <cstdlib>
 #include <new>
 
+namespace rt
+{
+    thread_local bool trapArmedOnThisThread = false;
+    std::atomic<int> trappedAllocations { 0 };
+}
+
+using rt::trappedAllocations;
+using rt::ScopedTrap;
+
 namespace
 {
-    std::atomic<bool> trapArmed { false };
-    std::atomic<int> trappedAllocations { 0 };
-
     void* tracked (std::size_t n)
     {
-        if (trapArmed.load (std::memory_order_relaxed))
+        if (rt::trapArmedOnThisThread)
             trappedAllocations.fetch_add (1, std::memory_order_relaxed);
         if (void* p = std::malloc (n == 0 ? 1 : n))
             return p;
         throw std::bad_alloc();
     }
 
-    struct ScopedTrap
-    {
-        ScopedTrap()  { trappedAllocations = 0; trapArmed = true; }
-        ~ScopedTrap() { trapArmed = false; }
-    };
-
-    class FakePlayHead final : public juce::AudioPlayHead
-    {
-    public:
-        juce::Optional<PositionInfo> getPosition() const override
-        {
-            PositionInfo info;
-            info.setIsPlaying (true);
-            info.setBpm (92.0);
-            info.setPpqPosition (ppq);
-            info.setTimeSignature (TimeSignature { 4, 4 });
-            return info;
-        }
-        double ppq = 0.0;
-    };
+    using FakePlayHead = rt::FakePlayHead;
 }
 
 void* operator new (std::size_t n) { return tracked (n); }

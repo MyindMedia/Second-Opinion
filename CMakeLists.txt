@@ -71,7 +71,9 @@ add_library(so_core STATIC
     src/core/reharm/BassGenerator.cpp
     src/core/reharm/Explainer.cpp
     src/core/reharm/Ranker.cpp
-    src/core/reharm/Reharmonizer.cpp)
+    src/core/reharm/Reharmonizer.cpp
+    src/core/audio/CaptureMath.cpp
+    src/core/preview/PreviewSynth.cpp)
 target_include_directories(so_core PUBLIC src)
 so_set_warnings(so_core)
 
@@ -120,6 +122,7 @@ juce_add_plugin(SecondOpinion
 target_sources(SecondOpinion PRIVATE
     src/plugin/Parameters.cpp
     src/plugin/PluginProcessor.cpp
+    src/plugin/AudioFileLoader.cpp
     src/plugin/PluginEditor.cpp
     src/bridge/WebBridge.cpp
     src/bridge/NativeDragStrip.cpp)
