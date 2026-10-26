@@ -8,8 +8,15 @@ Everything runs offline.
 Built with C++20, JUCE 9.0.4 and CMake. The interface is a WebView UI (TypeScript + Vite) embedded in
 the plugin binary; the MIDI drag strip at the bottom is a native JUCE component.
 
-> Status: Phase 1 (skeleton and foundations). See `STATUS.md` for what works today and what is
-> simulated.
+> Status: listening, reharmonization and Build out (song builder) work end to end. See `STATUS.md`
+> for measured results and known limits.
+
+Two modes in one window:
+
+- **Reharm**: capture or open an idea, see the chords it hears (with confidence), and audition
+  reharmonizations that explain why they work.
+- **Build out**: describe the song ("dark late-night R&B, hopeful chorus"), pick moods, and get a
+  full song built around your idea, three options per section, ready to drag into your DAW.
 
 ## Build on macOS (universal: Apple Silicon + Intel)
 
@@ -28,7 +35,8 @@ cmake --build --preset mac-universal-debug
 ctest --preset mac-universal-debug
 ```
 
-The first configure downloads JUCE 9.0.4 and Catch2 (about 2 to 4 minutes). The mac presets copy the
+The first configure downloads JUCE 9.0.4, Catch2 and ONNX Runtime (about 2 to 5 minutes, internet
+needed once). The mac presets copy the
 built plugins into `~/Library/Audio/Plug-Ins/VST3` and `~/Library/Audio/Plug-Ins/Components`, so your
 DAW finds them after a rescan. The Standalone app is in
 `build/mac-universal-debug/SecondOpinion_artefacts/Debug/Standalone/`.
