@@ -1,5 +1,6 @@
 import type { State, Store } from '../state/store';
-import type { HarmonicFunction, MelodyNote } from '../state/types';
+import type { HarmonicFunction, MelodyNote, Song } from '../state/types';
+import { MOOD_LABEL, sectionChords, transitionText } from '../state/song';
 import { chordHtml, isParsed, melodyRelation, parseChord, pcNameFlat, voice, type ParsedChord } from '../theory/chords';
 import { el, esc, icon } from '../ui/dom';
 
@@ -8,6 +9,7 @@ export interface WhyActions {
   audition(): void;
   setAB(mode: 'original' | 'suggestion'): void;
   closeDrawer(): void;
+  setListen(scope: 'section' | 'song'): void;
 }
 
 const FN_NAME: Record<HarmonicFunction, string> = { tonic: 'Tonic', predominant: 'Predominant', dominant: 'Dominant', color: 'Color' };
@@ -62,7 +64,7 @@ function melodyAt(melody: MelodyNote[], start: number, beats: number) {
   return melody.find((n) => n.startBeat >= start && n.startBeat < start + beats) ?? melody.find((n) => n.startBeat <= start && n.startBeat + n.beats > start);
 }
 
-function voiceLeadingSvg(prev: ParsedChord | null, cur: ParsedChord) {
+export function voiceLeadingSvg(prev: ParsedChord | null, cur: ParsedChord) {
   const b = prev ? voice(prev) : [];
   const v = voice(cur, b.length ? b : undefined);
   const all = [...b, ...v];
@@ -100,7 +102,76 @@ export function WhyPanel(store: Store, actions: WhyActions) {
     if (act === 'ab-original') actions.setAB('original');
     if (act === 'ab-suggestion') actions.setAB('suggestion');
     if (act === 'close') actions.closeDrawer();
+    if (act === 'listen-section') actions.setListen('section');
+    if (act === 'listen-song') actions.setListen('song');
   });
+
+  function renderSong(s: State, song: Song | undefined, head: string) {
+    const playing = s.auditioning && (s.auditionTarget === 'section' || s.auditionTarget === 'song');
+    const listen = `
+      <div class="why-listen">
+        <button class="btn btn-ghost${playing ? ' is-on' : ''}" data-act="listen" ${song ? '' : 'disabled'}>
+          ${playing ? icon.pause(12) : icon.play(12)}<span>${playing ? 'Stop' : 'Listen'}</span><kbd>Space</kbd>
+        </button>
+        <div class="seg-ctl ab" role="radiogroup" aria-label="What Listen plays">
+          <button role="radio" aria-checked="${s.songListen === 'section'}" data-act="listen-section" ${song ? '' : 'disabled'}>Section</button>
+          <button role="radio" aria-checked="${s.songListen === 'song'}" data-act="listen-song" ${song ? '' : 'disabled'}>Whole song</button>
+        </div>
+      </div>`;
+    const sec = song?.sections[s.selectedSection];
+    if (!song || !sec) {
+      const msg = s.songStatus === 'building' ? 'Writing your song. Each section gets three options to choose from.' : 'Build a song to see how each section leads into the next.';
+      root.innerHTML = `${head}<div class="why-empty"><p>${msg}</p></div>${listen}`;
+      return;
+    }
+    const oi = s.focusedOption ?? sec.chosen;
+    const opt = sec.options[oi];
+    if (!opt) { root.innerHTML = `${head}${listen}`; return; }
+    const chords = sectionChords(song, s.selectedSection, oi);
+    const romans = [...new Set(chords.map((c) => c.roman))].slice(0, 6).join(', ');
+    const prev = song.sections[s.selectedSection - 1];
+    const prevE = prev ? prev.options[prev.chosen]?.energy : undefined;
+    const delta = prevE === undefined ? 0 : opt.energy - prevE;
+    const energyLine = prev && prevE !== undefined
+      ? `Energy <span class="num">${opt.energy}</span>, ${Math.abs(delta) < 6 ? `level with ${esc(prev.label)}` : delta > 0 ? `a lift of <span class="num">${delta}</span> from ${esc(prev.label)}` : `<span class="num">${-delta}</span> below ${esc(prev.label)}`}. Tension <span class="num">${opt.tension}</span>.`
+      : `Energy <span class="num">${opt.energy}</span>, tension <span class="num">${opt.tension}</span>. This opens the song.`;
+
+    const t = transitionText(song, s.selectedSection, oi);
+    let vl = '';
+    if (t.from) {
+      const a = parseChord(t.from.symbol);
+      const b = t.to ? parseChord(t.to.symbol) : null;
+      if (isParsed(a)) {
+        const d = b && isParsed(b) ? voiceLeadingSvg(a, b) : null;
+        vl = `
+          <figure class="why-vl why-next">
+            <figcaption>
+              <span>${t.nextLabel ? `Into ${esc(t.nextLabel)}` : 'Ending'}</span>
+              <span class="num">${d ? `${d.total} semitones moved` : ''}</span>
+            </figcaption>
+            ${d ? d.svg : ''}
+            <p class="why-transition">${esc(t.text)}</p>
+          </figure>`;
+      }
+    }
+    const detailed = s.settings.depth === 'detailed';
+    root.innerHTML = `${head}
+      <div class="why-body">
+        <div class="why-id">
+          <div class="why-roman why-sec">${esc(sec.label)}</div>
+          <div class="why-chord">
+            <span class="why-opt">Option ${oi + 1} of ${sec.options.length}</span>
+            <span class="why-chips">${sec.isIdea ? '<span class="idea-chip">Your idea</span>' : ''}${oi === sec.chosen ? `<span class="fn-chip"><i class="sw sw-suggestion"></i>In use</span>` : `<span class="fn-chip">Not in use yet</span>`}</span>
+          </div>
+        </div>
+        <h3 class="why-title">${esc(opt.title)}</h3>
+        <p class="why-plain">${esc(opt.explanation)} <span class="why-term">(${esc(romans)})</span></p>
+        <p class="why-conf">${energyLine}</p>
+        ${vl}
+        ${detailed ? `<p class="why-detail">Read ${song.interpreter === 'online' ? 'with online AI' : 'offline'} as ${esc(song.interpretedAs ?? song.moods.map((m) => MOOD_LABEL[m]).join(', '))}. ${esc(song.arc)}</p>` : ''}
+      </div>
+      ${listen}`;
+  }
 
   function render() {
     const s = store.get();
@@ -117,6 +188,8 @@ export function WhyPanel(store: Store, actions: WhyActions) {
         </div>
         <button class="icon-btn sm only-compact" data-act="close" aria-label="Close">${icon.close()}</button>
       </div>`;
+
+    if (s.mode === 'build') return renderSong(s, s.song, head);
 
     const listen = `
       <div class="why-listen">
@@ -178,7 +251,7 @@ export function WhyPanel(store: Store, actions: WhyActions) {
   }
 
   store.subscribe((_, changed) => {
-    if (['focusedChord', 'selectedSuggestionId', 'settings', 'auditioning', 'abMode', 'analysis', 'suggestions'].some((k) => changed.has(k as never))) render();
+    if (['focusedChord', 'selectedSuggestionId', 'settings', 'auditioning', 'abMode', 'analysis', 'suggestions', 'mode', 'song', 'songStatus', 'selectedSection', 'focusedOption', 'songListen', 'auditionTarget'].some((k) => changed.has(k as never))) render();
   });
   render();
   return root;

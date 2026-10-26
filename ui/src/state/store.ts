@@ -1,4 +1,5 @@
-import type { AnalysisResult, Phase, ProgressStage, Suggestion } from './types';
+import type { AiStatus, AnalysisResult, IdeaSection, Mood, Phase, ProgressStage, Song, Structure, Suggestion } from './types';
+import type { AuditionTarget } from '../bridge/contract';
 import type { Notation } from '../theory/chords';
 
 export interface Settings {
@@ -13,6 +14,23 @@ export interface Settings {
   velocity: 'flat' | 'humanized';
   quality: 'fast' | 'balanced' | 'accurate';
   sourceHint: 'auto' | 'vocal' | 'keys' | 'guitar' | 'loop';
+  useOnlineAi: boolean;    // Build out: read the description with the online AI (needs a key)
+}
+
+export type Mode = 'reharm' | 'build';
+
+export interface BuildForm {
+  description: string;
+  moods: Mood[];
+  ideaSection: IdeaSection;
+  structure: Structure;
+}
+
+export interface DragPreview {
+  title: string;
+  startBeat: number;
+  totalBeats: number;
+  chords: { startBeat: number; beats: number }[];
 }
 
 export interface State {
@@ -40,6 +58,7 @@ export interface State {
   bannerDismissed: boolean;
   toast?: { kind: 'error' | 'info'; message: string; action?: string };
   errorMessage?: string;
+  errorTitle?: string;
   needsTempo: boolean;
   settingsOpen: boolean;
   settingsTab: string;
@@ -49,6 +68,24 @@ export interface State {
   hostTempo?: number;
   hostPlaying: boolean;
   history: Suggestion[][];
+  captureMaxBars: number;
+  auditionTarget?: AuditionTarget;
+  dragPreview?: DragPreview;
+
+  // Build out
+  mode: Mode;
+  build: BuildForm;
+  buildSeed: number;
+  song?: Song;
+  songStatus: 'idle' | 'building' | 'error';
+  songError?: string;
+  songProgress: number;
+  selectedSection: number;
+  focusedOption?: number;          // option shown in the WhyPanel; defaults to the chosen one
+  dragScope: 'section' | 'song';
+  songListen: 'section' | 'song';  // what Listen plays in Build out
+  songZoom: number;                // 1 = whole song fits the timeline
+  aiStatus: AiStatus;
 }
 
 type Listener = (s: State, changed: Set<keyof State>) => void;
@@ -95,4 +132,7 @@ export const defaultSettings: Settings = {
   velocity: 'humanized',
   quality: 'balanced',
   sourceHint: 'auto',
+  useOnlineAi: false,
 };
+
+export const defaultBuildForm: BuildForm = { description: '', moods: [], ideaSection: 'verse', structure: 'auto' };

@@ -74,6 +74,6 @@ describe('song mock', () => {
   });
 
   it('uses no em dashes in any copy', () => {
-    expect(JSON.stringify(mockSong(defaultBuildRequest(), analysis))).not.toMatch(/—/);
+    expect(JSON.stringify(mockSong(defaultBuildRequest(), analysis))).not.toMatch(/\u2014/);
   });
 });

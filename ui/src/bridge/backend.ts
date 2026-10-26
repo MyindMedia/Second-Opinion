@@ -37,3 +37,20 @@ export function createNativeBackend(
     },
   };
 }
+
+/** Native where the plugin registered the function, mock everywhere else. Events from both are
+    delivered, so a partly integrated build keeps working while functions land one at a time. */
+export function createHybridBackend(native: Backend | undefined, mock: Backend, registered: () => string[]): Backend {
+  if (!native) return mock;
+  return {
+    native: true,
+    call(name, ...args) {
+      return registered().includes(name) ? native.call(name, ...args) : mock.call(name, ...args);
+    },
+    on(name, fn) {
+      const a = native.on(name, fn);
+      const b = mock.on(name, fn);
+      return () => { a(); b(); };
+    },
+  };
+}

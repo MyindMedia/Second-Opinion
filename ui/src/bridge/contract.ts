@@ -185,7 +185,9 @@ export type AuditionTarget = 'original' | 'suggestion' | 'section' | 'song';
 
 export interface AuditionRequest {
   target: AuditionTarget;
-  id?: string;                 // suggestion id, or section index as a string for 'section'
+  /** 'suggestion': the suggestion id. 'section': "<sectionIndex>" plays the chosen option,
+      "<sectionIndex>.<optionIndex>" previews another option without choosing it. */
+  id?: string;
   play: boolean;
 }
 
@@ -228,6 +230,7 @@ export interface ParseChordResult extends Ack {
 export interface NativeFunctions {
   startCapture(): Ack;
   stopCapture(): Ack;
+  setTempo(bpm: number): Ack;
   openAudioFile(): OpenFileResult;
   analyzePcm(req: AnalyzePcmRequest): Ack;
   cancel(): Ack;
@@ -249,7 +252,7 @@ export interface NativeFunctions {
 export type NativeFunctionName = keyof NativeFunctions;
 
 export const NATIVE_FUNCTIONS: readonly NativeFunctionName[] = [
-  'startCapture', 'stopCapture', 'openAudioFile', 'analyzePcm', 'cancel', 'setChord', 'lock', 'generate',
+  'startCapture', 'stopCapture', 'setTempo', 'openAudioFile', 'analyzePcm', 'cancel', 'setChord', 'lock', 'generate',
   'audition', 'buildSong', 'chooseSectionOption', 'setProgression', 'exportMidi', 'getSession',
   'setSessionValue', 'setAiKey', 'getAiStatus', 'parseChord',
 ];

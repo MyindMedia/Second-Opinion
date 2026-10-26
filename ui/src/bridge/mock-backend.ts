@@ -142,6 +142,12 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       else setCapture('idle', 0);
       return ok;
     },
+    setTempo(bpm) {
+      if (!(bpm >= 40 && bpm <= 240)) return { ok: false, error: 'Use a tempo between 40 and 240 BPM.' };
+      if (analysis) analysis = { ...analysis, bpm };
+      runAnalysis('captured', 'Lead vocal');
+      return ok;
+    },
     openAudioFile() {
       // The browser preview opens a file input instead; this path exists for contract tests.
       runAnalysis('file', 'Example vocal.wav');
@@ -191,7 +197,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       const bpm = song?.bpm ?? analysis?.bpm ?? 92;
       let start = 0, length = (analysis?.bars ?? 32) * 4;
       if (song && (target === 'section' || target === 'song')) {
-        const sec = target === 'section' ? song.sections[Number(id)] : undefined;
+        const sec = target === 'section' ? song.sections[parseInt(id ?? '', 10)] : undefined;
         start = sec ? sec.startBar * song.beatsPerBar : 0;
         length = sec ? sec.bars * song.beatsPerBar : songBeats(song);
       }

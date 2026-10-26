@@ -1,5 +1,6 @@
 import type { Store } from '../state/store';
-import type { ChordSegment, HarmonicFunction, SuggestionChord } from '../state/types';
+import type { ChordSegment, HarmonicFunction, Song, SuggestionChord } from '../state/types';
+import { sectionChords, songBeats } from '../state/song';
 import { chordHtml } from '../theory/chords';
 import { clamp, el, esc, icon } from '../ui/dom';
 
@@ -7,6 +8,7 @@ export interface TimelineActions {
   selectOriginal(id: string, anchor: HTMLElement): void;
   selectSuggestionChord(id: string): void;
   setRange(startBeat: number, endBeat: number): void;
+  selectSection(index: number): void;
 }
 
 const FN_LABEL: Record<HarmonicFunction, string> = { tonic: 'Tonic', predominant: 'Predominant', dominant: 'Dominant', color: 'Color' };
@@ -30,7 +32,7 @@ export function Timeline(store: Store, actions: TimelineActions) {
       </div>
       <div class="tl-label lane-original"><i></i>Heard</div>
       <div class="tl-label lane-suggestion"><i></i><span data-slot="sugg-label">Suggestion</span></div>
-      <div class="tl-label">Function</div>
+      <div class="tl-label" data-slot="fn-label">Function</div>
       <div class="tl-label">Melody</div>
     </div>
     <div class="tl-scroll" tabindex="-1">
@@ -49,7 +51,9 @@ export function Timeline(store: Store, actions: TimelineActions) {
   const scroll = root.querySelector<HTMLElement>('.tl-scroll')!;
   const content = root.querySelector<HTMLElement>('.tl-content')!;
   const ruler = q('ruler'), original = q('original'), suggestion = q('suggestion'), roman = q('roman'), melody = q('melody');
-  const selection = q('selection'), playhead = q('playhead'), suggLabel = q('sugg-label');
+  const selection = q('selection'), playhead = q('playhead'), suggLabel = q('sugg-label'), fnLabel = q('fn-label');
+  let curPpb = store.get().pxPerBeat;
+  const buildMode = () => store.get().mode === 'build' && !!store.get().song;
 
   let range: [number, number] | null = null;
 
@@ -58,9 +62,13 @@ export function Timeline(store: Store, actions: TimelineActions) {
     const zoom = t.closest<HTMLElement>('[data-zoom]');
     if (zoom) {
       const s = store.get();
-      store.set({ pxPerBeat: clamp(s.pxPerBeat * (zoom.dataset.zoom === '1' ? 1.25 : 0.8), 8, 48) });
+      const f = zoom.dataset.zoom === '1' ? 1.25 : 0.8;
+      if (buildMode()) store.set({ songZoom: clamp(s.songZoom * f, 1, 8) });
+      else store.set({ pxPerBeat: clamp(s.pxPerBeat * f, 8, 48) });
       return;
     }
+    const sec = t.closest<HTMLElement>('[data-section]');
+    if (sec) { actions.selectSection(Number(sec.dataset.section)); return; }
     const seg = t.closest<HTMLElement>('[data-seg]');
     if (seg?.dataset.lane === 'original') actions.selectOriginal(seg.dataset.seg!, seg);
     if (seg?.dataset.lane === 'suggestion') actions.selectSuggestionChord(seg.dataset.seg!);
@@ -69,12 +77,15 @@ export function Timeline(store: Store, actions: TimelineActions) {
   scroll.addEventListener('wheel', (e) => {
     if (!(e.ctrlKey || e.metaKey)) return;
     e.preventDefault();
-    store.set({ pxPerBeat: clamp(store.get().pxPerBeat * (e.deltaY < 0 ? 1.1 : 0.9), 8, 48) });
+    const f = e.deltaY < 0 ? 1.1 : 0.9;
+    if (buildMode()) store.set({ songZoom: clamp(store.get().songZoom * f, 1, 8) });
+    else store.set({ pxPerBeat: clamp(store.get().pxPerBeat * f, 8, 48) });
   }, { passive: false });
 
   // Drag across the ruler to select a range of beats (Lock and Regenerate act on it).
   ruler.addEventListener('pointerdown', (e) => {
     const s = store.get();
+    if (buildMode()) return;
     const rect = content.getBoundingClientRect();
     const beatAt = (x: number) => Math.round(clamp((x - rect.left) / s.pxPerBeat, 0, (s.analysis?.bars ?? 32) * 4));
     const start = beatAt(e.clientX);
@@ -142,7 +153,12 @@ export function Timeline(store: Store, actions: TimelineActions) {
     const s = store.get();
     const a = s.analysis;
     if (!a) return;
+    root.classList.toggle('is-build', s.mode === 'build');
+    fnLabel.textContent = s.mode === 'build' ? 'Chords' : 'Function';
+    suggLabel.textContent = s.mode === 'build' ? 'Song' : 'Suggestion';
+    if (s.mode === 'build' && s.song) return renderSong(s, s.song);
     const ppb = s.pxPerBeat;
+    curPpb = ppb;
     const totalBeats = a.bars * a.beatsPerBar;
     content.style.width = `${totalBeats * ppb + 24}px`;
     content.style.setProperty('--ppb', `${ppb}px`);
@@ -158,11 +174,14 @@ export function Timeline(store: Store, actions: TimelineActions) {
 
     original.innerHTML = a.segments.map((seg) => segmentHtml(seg, ppb, s)).join('');
 
-    const sugg = s.suggestions.find((x) => x.id === s.selectedSuggestionId);
-    suggLabel.textContent = sugg ? 'Suggestion' : 'Suggestion';
-    suggestion.innerHTML = sugg
-      ? sugg.chords.map((c) => suggestionHtml(c, ppb, s)).join('')
-      : `<span class="lane-empty">Pick a suggestion below to see it under your chords</span>`;
+    const sugg = s.mode === 'reharm' ? s.suggestions.find((x) => x.id === s.selectedSuggestionId) : undefined;
+    suggestion.innerHTML = s.mode === 'build'
+      ? s.songStatus === 'building'
+        ? `<span class="song-skeleton" aria-hidden="true"></span><span class="lane-empty">Writing your song…</span>`
+        : `<span class="lane-empty">Your song map appears here after you build a song</span>`
+      : sugg
+        ? sugg.chords.map((c) => suggestionHtml(c, ppb, s)).join('')
+        : `<span class="lane-empty">Pick a suggestion below to see it under your chords</span>`;
 
     const rows: { startBeat: number; beats: number; roman: string; fn: HarmonicFunction }[] = sugg ? sugg.chords : a.segments;
     roman.innerHTML = rows
@@ -180,12 +199,90 @@ export function Timeline(store: Store, actions: TimelineActions) {
     drawSelection();
   }
 
+  // Build out: the whole song fits the width at zoom 1; heard chords sit over every idea section.
+  function renderSong(s: ReturnType<Store['get']>, song: Song) {
+    const a = s.analysis!;
+    const total = songBeats(song);
+    const bpb = song.beatsPerBar;
+    const fit = Math.max(2, (scroll.clientWidth - 24) / total);
+    const ppb = fit * s.songZoom;
+    curPpb = ppb;
+    content.style.width = `${total * ppb + 24}px`;
+    content.style.setProperty('--ppb', `${ppb}px`);
+    content.style.setProperty('--ppbar', `${ppb * bpb}px`);
+    content.style.setProperty('--chord-fs', '13px');
+
+    const every = [1, 2, 4, 8, 16].find((n) => n * ppb * bpb >= 26) ?? 16;
+    let r = '';
+    for (let bar = 0; bar < total / bpb; bar += every) r += `<span class="bar-num num" style="left:${bar * ppb * bpb}px">${bar + 1}</span>`;
+    ruler.innerHTML = r;
+
+    // Heard lane: the idea (first bars of the analysis) looped across each idea section.
+    let heard = '';
+    let mel = '';
+    const lo = 60, hi = 78;
+    for (const sec of song.sections) {
+      if (!sec.isIdea) continue;
+      const ideaBeats = Math.min(sec.bars, 8, a.bars) * bpb;
+      const start = sec.startBar * bpb, len = sec.bars * bpb;
+      const segs = a.segments.filter((x) => x.startBeat < ideaBeats);
+      const avg = segs.length ? (ideaBeats * ppb) / segs.length : 0;
+      for (let off = 0; off < len; off += ideaBeats) {
+        if (avg < 34) {
+          // Too narrow for one block per chord: one run per loop, symbols in order, clipped.
+          const w = Math.min(ideaBeats, len - off) * ppb - 2;
+          heard += `<span class="seg-idea-run" style="left:${(start + off) * ppb}px;width:${w}px" title="${esc(segs.map((x) => x.symbol).join(' '))}">${segs.map((x) => chordHtml(x.symbol, s.settings.notation)).join('<i></i>')}</span>`;
+        } else {
+          for (const seg of segs) {
+            if (off + seg.startBeat >= len) continue;
+            const w = Math.min(seg.beats, len - off - seg.startBeat) * ppb - 2;
+            heard += `<span class="seg seg-original seg-mini conf-${confLevel(seg.confidence)}" style="left:${(start + off + seg.startBeat) * ppb}px;width:${w}px" title="${esc(seg.symbol)}">${w >= 34 ? chordHtml(seg.symbol, s.settings.notation) : ''}</span>`;
+          }
+        }
+        for (const n of a.melody) {
+          if (n.startBeat >= ideaBeats || off + n.startBeat >= len) continue;
+          const y = 1 - (clamp(n.pitch, lo, hi) - lo) / (hi - lo);
+          mel += `<i style="left:${(start + off + n.startBeat) * ppb}px;width:${Math.max(2, n.beats * ppb - 1)}px;top:calc(${(y * 100).toFixed(1)}% - ${(y * 4).toFixed(1)}px)"></i>`;
+        }
+      }
+    }
+    original.innerHTML = heard || `<span class="lane-empty">Your idea is not placed in this song</span>`;
+    melody.innerHTML = mel;
+
+    suggestion.innerHTML = song.sections.map((sec, i) => {
+      const w = sec.bars * bpb * ppb - 3;
+      const sel = i === s.selectedSection;
+      const showBars = w >= 64;
+      return `<button role="listitem" class="sec-block${sec.isIdea ? ' is-idea' : ''}${sel ? ' is-selected' : ''}${w < 44 ? ' is-narrow' : ''}" data-section="${i}"
+          style="left:${sec.startBar * bpb * ppb}px;width:${w}px" aria-pressed="${sel}"
+          aria-label="${esc(sec.label)}, ${sec.bars} bars${sec.isIdea ? ', your idea' : ''}" title="${esc(sec.label)}, ${sec.bars} bars${sec.isIdea ? '. Your idea' : ''}">
+          <span class="sec-name">${esc(sec.label)}</span>
+          <span class="sec-sub">${sec.isIdea ? '<span class="sec-idea">Your idea</span>' : ''}${showBars ? `<span class="num">${sec.bars} bars</span>` : ''}</span>
+        </button>`;
+    }).join('');
+
+    roman.innerHTML = song.sections.flatMap((_, i) => sectionChords(song, i)).map((c) => {
+      const w = c.beats * ppb - 2;
+      return `<span class="rn rn-song fn-${c.fn}" style="left:${c.startBeat * ppb}px;width:${w}px" title="${esc(c.symbol)}, ${esc(c.roman)}"><i aria-hidden="true"></i>${w >= 30 ? `<b>${chordHtml(c.symbol, s.settings.notation)}</b>` : ''}</span>`;
+    }).join('');
+
+    selection.hidden = true;
+  }
+
+  function revealSection() {
+    const s = store.get();
+    const sec = s.song?.sections[s.selectedSection];
+    if (!sec || !buildMode()) return;
+    const x0 = sec.startBar * s.song!.beatsPerBar * curPpb, x1 = x0 + sec.bars * s.song!.beatsPerBar * curPpb;
+    if (x0 < scroll.scrollLeft || x1 > scroll.scrollLeft + scroll.clientWidth) scroll.scrollLeft = Math.max(0, x0 - 24);
+  }
+
   function renderPlayhead() {
     const s = store.get();
     const beat = s.playheadBeat;
     playhead.hidden = beat === null;
     if (beat !== null) {
-      const x = beat * s.pxPerBeat;
+      const x = beat * curPpb;
       playhead.style.transform = `translateX(${x}px)`;
       // Keep the playhead in view while auditioning.
       if (x < scroll.scrollLeft + 40 || x > scroll.scrollLeft + scroll.clientWidth - 80) scroll.scrollLeft = Math.max(0, x - 80);
@@ -193,9 +290,12 @@ export function Timeline(store: Store, actions: TimelineActions) {
   }
 
   store.subscribe((_, changed) => {
-    if (['analysis', 'suggestions', 'selectedSuggestionId', 'focusedChord', 'locked', 'pxPerBeat', 'settings'].some((k) => changed.has(k as never))) render();
-    if (changed.has('playheadBeat') || changed.has('pxPerBeat')) renderPlayhead();
+    if (['analysis', 'suggestions', 'selectedSuggestionId', 'focusedChord', 'locked', 'pxPerBeat', 'settings', 'mode', 'song', 'songStatus', 'selectedSection', 'songZoom', 'compact'].some((k) => changed.has(k as never))) render();
+    if (changed.has('selectedSection') || changed.has('song')) revealSection();
+    if (['playheadBeat', 'pxPerBeat', 'songZoom', 'mode', 'song'].some((k) => changed.has(k as never))) renderPlayhead();
   });
+  // Fit-to-width depends on the scroller's size.
+  new ResizeObserver(() => { if (buildMode()) render(); }).observe(scroll);
 
   render();
   return root;

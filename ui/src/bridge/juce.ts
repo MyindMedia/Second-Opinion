@@ -25,6 +25,7 @@ const init = (): JuceInit => {
 };
 
 export const isNative = () => init().__juce__functions.length > 0;
+export const registeredFunctions = () => init().__juce__functions;
 
 /** An echo of our own write comes back from the backend within this window; anything else is the host. */
 const ECHO_MS = 400;
