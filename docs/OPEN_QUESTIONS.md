@@ -35,3 +35,14 @@ New from Phase 1:
 14. JUCE licence tier: Starter is fine for development; plan the Indie upgrade before sales.
 15. GitHub: which repository should CI run in? The workflow is ready in `.github/workflows/ci.yml`.
 16. UI: short color-chip labels ("Mediant", "Neo-Riemann", full names in tooltips). OK?
+
+New from the Build out session:
+
+17. Online AI (decided: offline by default, online opt-in; ADR 0010). Which model and who pays for
+    API usage at launch: each user's own key (current build), or a Second Opinion account later?
+18. Key change in Build out: a final-chorus key change is skipped when your idea comes after the
+    bridge, so your idea stays exact. Allow transposing the idea for the last chorus?
+19. The idea section shows one option (your chords as played). Also offer variations of the idea
+    itself (for example richer extensions), clearly labelled?
+20. Binary size: the prebuilt ONNX Runtime for macOS is 67 MB, above the 60 MB per-format budget.
+    The minimal static build (ADR 0009) fixes this before release.
