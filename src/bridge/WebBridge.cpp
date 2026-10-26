@@ -8,7 +8,6 @@
 
 namespace so::bridge
 {
-namespace json = so::bridge::json;
 
 using juce::var;
 using Completion = juce::WebBrowserComponent::NativeFunctionCompletion;

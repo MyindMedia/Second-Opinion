@@ -57,8 +57,11 @@ You need Visual Studio 2022 (Desktop development with C++), CMake 3.25+, and Nod
 The WebView2 SDK is linked statically, so install the NuGet package once in PowerShell:
 
 ```powershell
-Register-PackageSource -ProviderName NuGet -Name nugetRepository -Location https://www.nuget.org/api/v2 -Force
-Install-Package Microsoft.Web.WebView2 -Scope CurrentUser -RequiredVersion 1.0.1901.177 -Source nugetRepository -Force
+$ver  = '1.0.3485.44'
+$dest = "$env:USERPROFILE\AppData\Local\PackageManagement\NuGet\Packages\Microsoft.Web.WebView2.$ver"
+New-Item -ItemType Directory -Force -Path $dest | Out-Null
+Invoke-WebRequest "https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/$ver" -OutFile "$env:TEMP\webview2.zip"
+Expand-Archive "$env:TEMP\webview2.zip" -DestinationPath $dest -Force
 ```
 
 Then:

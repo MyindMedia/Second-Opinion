@@ -49,9 +49,13 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Scope CurrentUser -Force | Out-Null
-          Register-PackageSource -ProviderName NuGet -Name nugetRepository -Location https://www.nuget.org/api/v2 -Force -ErrorAction SilentlyContinue
-          Install-Package Microsoft.Web.WebView2 -Scope CurrentUser -RequiredVersion 1.0.3485.44 -Source nugetRepository -Force
+          $ver = '1.0.3485.44'
+          $dest = Join-Path $env:USERPROFILE "AppData\Local\PackageManagement\NuGet\Packages\Microsoft.Web.WebView2.$ver"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          $pkg = Join-Path $env:RUNNER_TEMP "webview2.zip"
+          Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/$ver" -OutFile $pkg
+          Expand-Archive -Path $pkg -DestinationPath $dest -Force
+          if (-not (Test-Path (Join-Path $dest 'build\native\include\WebView2.h'))) { throw 'WebView2.h missing after extract' }
 
       - name: Configure
         run: cmake --preset ${{ matrix.preset }} -DSO_BUILD_TESTS=OFF
