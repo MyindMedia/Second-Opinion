@@ -1,0 +1,151 @@
+name: Nightly
+
+# NFR-11 and PRD section 10: pluginval at strictness 10 on macOS and Windows, plus an
+# AddressSanitizer + UndefinedBehaviorSanitizer Debug build of the headless unit tests.
+# The accuracy eval runs in its own workflow.
+
+on:
+  schedule:
+    - cron: "17 7 * * *"   # daily, 07:17 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-cache
+
+jobs:
+  pluginval-strict:
+    name: pluginval 10 (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-14
+            preset: mac-universal-release
+            config: Release
+          - name: Windows
+            os: windows-latest
+            preset: win-x64-release
+            config: Release
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+        with: { lfs: true }
+
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: ui/package-lock.json }
+
+      - uses: actions/cache@v4
+        with:
+          path: .cpm-cache
+          key: cpm-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cmake/OnnxRuntime.cmake') }}
+          restore-keys: cpm-${{ runner.os }}-
+
+      - name: WebView2 SDK (static linking, NEEDS_WEBVIEW2)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Scope CurrentUser -Force | Out-Null
+          Register-PackageSource -ProviderName NuGet -Name nugetRepository -Location https://www.nuget.org/api/v2 -Force -ErrorAction SilentlyContinue
+          Install-Package Microsoft.Web.WebView2 -Scope CurrentUser -RequiredVersion 1.0.3485.44 -Source nugetRepository -Force
+
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }} -DSO_BUILD_TESTS=OFF
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }} --parallel
+
+      - name: pluginval 10 (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          curl -sSL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_macOS.zip
+          unzip -q pluginval.zip
+          ./pluginval.app/Contents/MacOS/pluginval --strictness-level 10 --validate-in-process --timeout-ms 600000 \
+            --output-dir pluginval-logs \
+            --validate "build/${{ matrix.preset }}/SecondOpinion_artefacts/${{ matrix.config }}/VST3/Second Opinion.vst3"
+
+      - name: auval (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          rm -rf ~/Library/Audio/Plug-Ins/Components/"Second Opinion.component"
+          cp -R "build/${{ matrix.preset }}/SecondOpinion_artefacts/${{ matrix.config }}/AU/Second Opinion.component" ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar || true
+          auval -strict -v aufx SOp1 Brmt
+
+      - name: pluginval 10 (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Windows.zip -OutFile pluginval.zip
+          Expand-Archive pluginval.zip -DestinationPath .
+          ./pluginval.exe --strictness-level 10 --validate-in-process --timeout-ms 600000 --output-dir pluginval-logs --validate "build/${{ matrix.preset }}/SecondOpinion_artefacts/${{ matrix.config }}/VST3/Second Opinion.vst3"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Upload pluginval logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pluginval-10-${{ matrix.name }}
+          path: pluginval-logs
+          if-no-files-found: ignore
+
+  sanitizers:
+    name: ASan + UBSan unit tests (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-14
+          - name: Linux clang
+            os: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    env:
+      ASAN_OPTIONS: detect_leaks=0:abort_on_error=1:strict_string_checks=1
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+    steps:
+      - uses: actions/checkout@v4
+        with: { lfs: true }
+
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: ui/package-lock.json }
+
+      - uses: actions/cache@v4
+        with:
+          path: .cpm-cache
+          key: cpm-asan-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cmake/OnnxRuntime.cmake') }}
+          restore-keys: cpm-asan-${{ runner.os }}-
+
+      - name: Dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ninja-build clang-18 libclang-rt-18-dev libwebkit2gtk-4.1-dev libgtk-3-dev libasound2-dev \
+            libcurl4-openssl-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxcomposite-dev
+          echo "CC=clang-18" >> "$GITHUB_ENV"
+          echo "CXX=clang++-18" >> "$GITHUB_ENV"
+
+      - name: Dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      # Single-architecture Ninja build: sanitizers do not need the universal Xcode setup, and
+      # so_unit_tests is headless (so_core only), so the plugin itself is not compiled.
+      - name: Configure
+        run: >
+          cmake -S . -B build/asan -G Ninja -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_OSX_ARCHITECTURES=${{ runner.os == 'macOS' && 'arm64' || '' }}
+          -DSO_ENABLE_ONNX=OFF
+          "-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined"
+          "-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined"
+          "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined"
+      - name: Build so_unit_tests
+        run: cmake --build build/asan --target so_unit_tests --parallel
+      - name: Run so_unit_tests
+        run: ./build/asan/tests/so_unit_tests

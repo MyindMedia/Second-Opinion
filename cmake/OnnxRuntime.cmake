@@ -11,6 +11,13 @@
 #
 # Offline builds: pass -DSO_ORT_ROOT=/path/to/extracted/onnxruntime-<os>-<ver> (the folder that
 # holds include/ and lib/), or -DSO_ORT_ARCHIVE=/path/to/the/release/archive.
+#
+# The archive is downloaded once into SO_ORT_DOWNLOAD_DIR (default: <CPM_SOURCE_CACHE>/onnxruntime
+# when a CPM source cache is set, so Debug and Release presets and CI caches share it).
+#
+# Opt-in minimal static build (ADR 0009, Q20): -DSO_ORT_MINIMAL=ON -DSO_ORT_MINIMAL_ROOT=<prefix>
+# where <prefix> was produced by cmake/ort_minimal/build_ort_minimal.py. Nothing is shipped next
+# to the plugin binary in that mode; ORT is linked statically with its symbols hidden.
 
 option(SO_ENABLE_ONNX "Build Basic Pitch transcription with ONNX Runtime" ON)
 
@@ -21,6 +28,63 @@ endif()
 set(SO_ORT_VERSION "1.21.0")
 set(SO_ORT_ROOT "" CACHE PATH "Extracted ONNX Runtime release (skips the download)")
 set(SO_ORT_ARCHIVE "" CACHE FILEPATH "Local copy of the ONNX Runtime release archive (skips the download)")
+option(SO_ORT_MINIMAL "Link a minimal, static, reduced-operator ONNX Runtime (ADR 0009)" OFF)
+set(SO_ORT_MINIMAL_ROOT "" CACHE PATH "Prefix written by cmake/ort_minimal/build_ort_minimal.py")
+
+# ONNX Runtime 1.20+ release binaries for macOS are built with a 13.3 minimum (LC_BUILD_VERSION
+# minos 13.3 in both slices of the 1.21.0 universal2 dylib). Older systems may fail to load it.
+if(APPLE AND CMAKE_OSX_DEPLOYMENT_TARGET AND CMAKE_OSX_DEPLOYMENT_TARGET VERSION_LESS "13.3")
+    message(WARNING "CMAKE_OSX_DEPLOYMENT_TARGET is ${CMAKE_OSX_DEPLOYMENT_TARGET} but ONNX Runtime "
+                    "${SO_ORT_VERSION} for macOS requires 13.3. The plugin links it, so it may not load on "
+                    "macOS 12 to 13.2. Decide in Q9 (raise the minimum, or pin an older ORT). See ADR 0009.")
+endif()
+
+# ---------------------------------------------------------------------------------------------
+# Minimal static build (opt-in)
+# ---------------------------------------------------------------------------------------------
+if(SO_ORT_MINIMAL)
+    if(NOT EXISTS "${SO_ORT_MINIMAL_ROOT}/include/onnxruntime_cxx_api.h")
+        message(FATAL_ERROR "SO_ORT_MINIMAL=ON needs SO_ORT_MINIMAL_ROOT=<prefix> with include/ and lib/ "
+                            "(run cmake/ort_minimal/build_ort_minimal.py first). Got '${SO_ORT_MINIMAL_ROOT}'.")
+    endif()
+    if(WIN32)
+        set(_ort_static "${SO_ORT_MINIMAL_ROOT}/lib/onnxruntime_minimal.lib")
+    else()
+        set(_ort_static "${SO_ORT_MINIMAL_ROOT}/lib/libonnxruntime_minimal.a")
+    endif()
+    if(NOT EXISTS "${_ort_static}")
+        message(FATAL_ERROR "Minimal ONNX Runtime archive not found: ${_ort_static}")
+    endif()
+
+    find_package(Threads REQUIRED)
+    add_library(so::onnxruntime INTERFACE IMPORTED GLOBAL)
+    set_target_properties(so::onnxruntime PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "${SO_ORT_MINIMAL_ROOT}/include"
+        INTERFACE_COMPILE_DEFINITIONS "SO_ORT_STATIC=1")
+    if(APPLE)
+        # -load_hidden: every symbol pulled from the archive becomes hidden in the plugin binary, so
+        # two plugins with their own static ORT can never interpose each other.
+        target_link_libraries(so::onnxruntime INTERFACE "-Wl,-load_hidden,${_ort_static}"
+                              "-framework Foundation" Threads::Threads)
+    elseif(WIN32)
+        # Static .lib symbols are never exported from the plugin DLL (ORT exports via a .def file
+        # only in its own shared build).
+        target_link_libraries(so::onnxruntime INTERFACE "${_ort_static}" advapi32 dbghelp shlwapi)
+    else()
+        target_link_libraries(so::onnxruntime INTERFACE "${_ort_static}" Threads::Threads ${CMAKE_DL_LIBS})
+        target_link_options(so::onnxruntime INTERFACE "LINKER:--exclude-libs,ALL")
+    endif()
+
+    set(SO_ORT_RUNTIME_FILES "")
+    set(SO_ORT_LICENSE_FILES "${SO_ORT_MINIMAL_ROOT}/LICENSE" "${SO_ORT_MINIMAL_ROOT}/ThirdPartyNotices.txt")
+    # A minimal build only loads ORT-format models. The runner reads the file into memory and ORT
+    # detects the format from the bytes, so the converted model ships under the existing name
+    # (SessionEngine looks for basic_pitch/nmp.onnx) until the lookup learns nmp.ort.
+    set(SO_ORT_MINIMAL_MODEL "${SO_ORT_MINIMAL_ROOT}/model/nmp.ort")
+    message(STATUS "ONNX Runtime ${SO_ORT_VERSION} (minimal static): ${SO_ORT_MINIMAL_ROOT}")
+endif()
+
+if(NOT SO_ORT_MINIMAL)
 
 # Hashes computed from the GitHub release assets on 2026-10-26 (ADR 0009).
 if(APPLE)
@@ -42,10 +106,19 @@ else()
     return()
 endif()
 
+if(CPM_SOURCE_CACHE)
+    set(_ort_dl_default "${CPM_SOURCE_CACHE}/onnxruntime")
+elseif(DEFINED ENV{CPM_SOURCE_CACHE})
+    set(_ort_dl_default "$ENV{CPM_SOURCE_CACHE}/onnxruntime")
+else()
+    set(_ort_dl_default "${CMAKE_BINARY_DIR}/_deps/onnxruntime")
+endif()
+set(SO_ORT_DOWNLOAD_DIR "${_ort_dl_default}" CACHE PATH "Where the ONNX Runtime archive is downloaded and extracted")
+
 if(SO_ORT_ROOT)
     set(_ort_root "${SO_ORT_ROOT}")
 else()
-    set(_ort_dl_dir "${CMAKE_BINARY_DIR}/_deps/onnxruntime")
+    set(_ort_dl_dir "${SO_ORT_DOWNLOAD_DIR}")
     set(_ort_root "${_ort_dl_dir}/${_ort_pkg}")
     if(NOT EXISTS "${_ort_root}/include/onnxruntime_cxx_api.h")
         if(SO_ORT_ARCHIVE)
@@ -69,7 +142,16 @@ else()
                                     "-DSO_ORT_ARCHIVE=<archive> or -DSO_ORT_ROOT=<dir>, or -DSO_ENABLE_ONNX=OFF.")
             endif()
         endif()
-        file(ARCHIVE_EXTRACT INPUT "${_ort_archive}" DESTINATION "${_ort_dl_dir}")
+        # Extract next to the final folder, then rename, so an interrupted or parallel configure
+        # never leaves a half-extracted tree that looks complete.
+        string(RANDOM LENGTH 8 _ort_rand)
+        set(_ort_tmp "${_ort_dl_dir}/.extract-${_ort_rand}")
+        file(ARCHIVE_EXTRACT INPUT "${_ort_archive}" DESTINATION "${_ort_tmp}")
+        if(NOT EXISTS "${_ort_root}/include/onnxruntime_cxx_api.h")
+            file(REMOVE_RECURSE "${_ort_root}")
+            file(RENAME "${_ort_tmp}/${_ort_pkg}" "${_ort_root}")
+        endif()
+        file(REMOVE_RECURSE "${_ort_tmp}")
     endif()
 endif()
 
@@ -83,6 +165,32 @@ set_target_properties(so::onnxruntime PROPERTIES
 
 if(APPLE)
     set(_ort_lib "${_ort_root}/lib/libonnxruntime.${SO_ORT_VERSION}.dylib")
+    # The release dylib is universal2 but only its arm64 slice carries a (linker) signature; the
+    # x86_64 slice is unsigned. Xcode then refuses to sign a bundle that nests it ("code object is
+    # not signed at all, in subcomponent"). Ad-hoc sign a private copy once; release signing
+    # re-signs it with the Developer ID (packaging/macos).
+    find_program(SO_CODESIGN codesign)
+    if(SO_CODESIGN)
+        set(_ort_signed_dir "${CMAKE_BINARY_DIR}/_deps/onnxruntime-adhoc")
+        set(_ort_signed "${_ort_signed_dir}/libonnxruntime.${SO_ORT_VERSION}.dylib")
+        set(_ort_stamp "${_ort_signed_dir}/adhoc.stamp")
+        set(_ort_stamp_text "${_ort_lib} ${_ort_sha256}")
+        set(_ort_stamp_old "")
+        if(EXISTS "${_ort_stamp}")
+            file(READ "${_ort_stamp}" _ort_stamp_old)
+        endif()
+        if(NOT EXISTS "${_ort_signed}" OR NOT _ort_stamp_old STREQUAL _ort_stamp_text)
+            file(MAKE_DIRECTORY "${_ort_signed_dir}")
+            file(COPY_FILE "${_ort_lib}" "${_ort_signed}")
+            execute_process(COMMAND "${SO_CODESIGN}" --force --sign - "${_ort_signed}"
+                            RESULT_VARIABLE _ort_cs_rc ERROR_VARIABLE _ort_cs_err)
+            if(NOT _ort_cs_rc EQUAL 0)
+                message(FATAL_ERROR "codesign of ${_ort_signed} failed: ${_ort_cs_err}")
+            endif()
+            file(WRITE "${_ort_stamp}" "${_ort_stamp_text}")
+        endif()
+        set(_ort_lib "${_ort_signed}")
+    endif()
     set_target_properties(so::onnxruntime PROPERTIES
         IMPORTED_LOCATION "${_ort_lib}"
         IMPORTED_SONAME "@rpath/libonnxruntime.${SO_ORT_VERSION}.dylib")
@@ -103,6 +211,7 @@ endif()
 
 set(SO_ORT_LICENSE_FILES "${_ort_root}/LICENSE" "${_ort_root}/ThirdPartyNotices.txt")
 message(STATUS "ONNX Runtime ${SO_ORT_VERSION}: ${_ort_root}")
+endif()   # NOT SO_ORT_MINIMAL
 
 # Copies the runtime library into <dest-dir> after <target> builds. On Linux the file is renamed
 # to its SONAME (libonnxruntime.so.1), which is what the loader looks for.
@@ -136,8 +245,10 @@ function(so_bundle_basic_pitch shared_target)
 
         if(APPLE)
             target_sources(${_t} PRIVATE ${SO_ORT_RUNTIME_FILES} ${_model_files} ${SO_ORT_LICENSE_FILES})
-            set_source_files_properties(${SO_ORT_RUNTIME_FILES} TARGET_DIRECTORY ${_t}
-                PROPERTIES MACOSX_PACKAGE_LOCATION Frameworks)
+            if(SO_ORT_RUNTIME_FILES)
+                set_source_files_properties(${SO_ORT_RUNTIME_FILES} TARGET_DIRECTORY ${_t}
+                    PROPERTIES MACOSX_PACKAGE_LOCATION Frameworks)
+            endif()
             set_source_files_properties(${_model_files} TARGET_DIRECTORY ${_t}
                 PROPERTIES MACOSX_PACKAGE_LOCATION Resources/basic_pitch)
             set_source_files_properties(${SO_ORT_LICENSE_FILES} TARGET_DIRECTORY ${_t}

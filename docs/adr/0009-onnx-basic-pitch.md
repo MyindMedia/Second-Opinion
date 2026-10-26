@@ -134,7 +134,8 @@ the same `so::onnxruntime` target, as basicpitch.cpp does:
 
 1. Convert the model to ORT format and generate the operator config:
    `python -m onnxruntime.tools.convert_onnx_models_to_ort models/basic_pitch/nmp.onnx`
-   (writes `nmp.ort` and `nmp.required_operators.config`).
+   (writes `nmp.ort` and `nmp.required_operators.config`). Done: see "Minimal build: recipe"
+   below for the committed config (with type reduction) and the script.
 2. Build ORT 1.21.0 from source per platform (macOS arm64 and x86_64, lipo'd; Windows x64) with
    `--minimal_build --include_ops_by_config nmp.required_operators.config --disable_ml_ops
    --disable_rtti --skip_tests --cmake_extra_defines CMAKE_POSITION_INDEPENDENT_CODE=ON`
@@ -148,6 +149,69 @@ the same `so::onnxruntime` target, as basicpitch.cpp does:
 5. CI: size budget check per format (NFR-09 < 60 MB), and the fixture test against the static build.
 
 Expected result (estimate): a few MB of ORT code per architecture instead of 20 to 67 MB.
+
+## Minimal build: recipe, operator config and status (Q20, 2026-10-26)
+
+**Status: not built.** The recipe, the operator config and the CMake path are committed and
+configure-tested; the static library itself has not been produced on any OS. A minimal ORT build
+is several hundred translation units plus abseil, protobuf-lite, flatbuffers and MLAS; on the
+shared 2-core dev VM at `-j1` that is hours, far past the 45-minute budget, so it was not
+attempted. Run it on a Mac (both architectures) and on Windows, or in a one-off CI job.
+
+What is in the repo:
+
+- `cmake/ort_minimal/nmp.required_operators_and_types.config`, generated from `nmp.onnx` with
+  onnxruntime 1.21.0:
+  `python -m onnxruntime.tools.convert_onnx_models_to_ort --optimization_style Fixed --enable_type_reduction`.
+  (`create_reduced_build_config.py` is only in the ORT source tree, not the wheel; the converter
+  writes the same config from the ORT-format model.) Operators: Where, Conv, Cast, Concat, Equal,
+  Log, Neg, Pad, ReduceMax/Min/Sum, Slice, Sqrt, Transpose, Unsqueeze, Add, Div, Mul, Reshape, Sub,
+  Shape, and **com.microsoft FusedConv** (Conv + Relu/Sigmoid fused by the Fixed-style optimiser),
+  so contrib ops must stay enabled. No `--target_platform`, so the x86-only NchwcTransformer is
+  disabled and one `.ort` file serves arm64 and x86_64.
+- Verified with onnxruntime 1.21.0 (Python): the `.ort` model (303,448 bytes) loads **from a byte
+  buffer** with format auto-detection, which is how `BasicPitchRunner` loads models; outputs match
+  the `.onnx` model within 2.8e-5 on a random input.
+- `cmake/ort_minimal/build_ort_minimal.py --prefix <dir>`: clones ORT v1.21.0, converts the model,
+  runs `tools/ci_build/build.py --config MinSizeRel --minimal_build --include_ops_by_config <cfg>
+  --enable_reduced_operator_type_support --disable_ml_ops --disable_rtti --skip_tests
+  --compile_no_warning_as_error` with `onnxruntime_BUILD_UNIT_TESTS=OFF`, PIC, and hidden
+  visibility (`CMAKE_{C,CXX}_VISIBILITY_PRESET=hidden`, inlines hidden) on macOS/Linux; no
+  `--build_shared_lib`. macOS builds arm64 and x86_64 separately (`--osx_arch`,
+  `--apple_deploy_target 13.3`) and `lipo`s them; Windows uses the VS 2022 generator with the
+  dynamic CRT (`/MD`, same as JUCE). All produced static archives except tests, tools and full
+  protobuf are merged into one (`libtool -static`, `lib.exe`, `ar -M`) and installed with the
+  public headers, the `.ort` model and ORT's licence files.
+- `cmake/OnnxRuntime.cmake`: `-DSO_ORT_MINIMAL=ON -DSO_ORT_MINIMAL_ROOT=<prefix>` makes
+  `so::onnxruntime` an interface target over the merged archive. Symbol hiding at link time:
+  macOS `-Wl,-load_hidden,<archive>` (every symbol from the archive becomes hidden in the plugin
+  binary), Linux `-Wl,--exclude-libs,ALL`, Windows needs nothing (static `.lib` symbols are not
+  exported; ORT exports through a `.def` file only in its shared build). Extra system libraries:
+  Foundation and pthreads (macOS), pthreads and `dl` (Linux), advapi32, dbghelp, shlwapi
+  (Windows; harmless if unused). Nothing is copied next to the binary, `/DELAYLOAD` is dropped,
+  and `SO_ORT_STATIC=1` is defined for code that wants to know.
+- The minimal runtime only reads ORT format. Because `SessionEngine` looks for
+  `basic_pitch/nmp.onnx`, CMake bundles the converted model under that name in minimal mode.
+  Follow-up (plugin code, not done here): look for `nmp.ort` first, and point `so_ml_tests` at the
+  converted model when `SO_ORT_STATIC` is defined (today the fixture test loads the `.onnx`).
+
+Next steps: run the script on macOS and Windows, run `so_ml_tests` against the result, compare
+binary sizes per format against NFR-09 (the Release workflow prints them), then make
+`SO_ORT_MINIMAL` the default for release presets.
+
+## macOS minimum version (affects Q9)
+
+Both slices of the 1.21.0 universal2 dylib declare `LC_BUILD_VERSION minos 13.3` (checked with
+`llvm-objdump --macho --private-headers`; whether a source build of 1.21 still compiles for 12.0
+is unverified, so the script uses 13.3), while the plugin targets 12.0 and links the dylib
+directly (not weak). On macOS 12 to 13.2 the plugin may fail to load. CMake now warns when the
+deployment target is below 13.3. Options: raise the minimum to 13.3 (simplest), or pin an older
+ORT for macOS. Decide with Q9 before the beta.
+
+Also found: the x86_64 slice of that dylib is unsigned (only the arm64 slice has a linker
+signature), which makes Xcode's signing of any bundle that nests it fail. `OnnxRuntime.cmake` now
+ad-hoc signs a private copy (`build/<preset>/_deps/onnxruntime-adhoc/`) at configure time; release
+signing replaces that signature with the Developer ID one (`packaging/macos/build_pkg.sh`).
 
 ## Git LFS
 

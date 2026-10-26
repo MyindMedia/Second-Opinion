@@ -99,14 +99,20 @@ if(SO_ENABLE_ONNX)
     add_library(so_ml STATIC src/core/analysis/BasicPitchRunner.cpp)
     target_link_libraries(so_ml PUBLIC so_core so::onnxruntime)
     so_set_warnings(so_ml)
-    if(WIN32)
+    if(WIN32 AND NOT SO_ORT_MINIMAL)
         # The runner loads onnxruntime.dll by full path from the plugin folder; the import is only
         # a fallback, so it must not be resolved when the plugin DLL loads.
         target_link_options(so_ml INTERFACE "/DELAYLOAD:onnxruntime.dll")
         target_link_libraries(so_ml INTERFACE delayimp)
     endif()
+    set(SO_BASIC_PITCH_MODEL ${CMAKE_SOURCE_DIR}/models/basic_pitch/nmp.onnx)
+    if(SO_ORT_MINIMAL)
+        # The minimal runtime only reads ORT format; ship the converted model under the same name.
+        configure_file(${SO_ORT_MINIMAL_MODEL} ${CMAKE_BINARY_DIR}/basic_pitch_ort/nmp.onnx COPYONLY)
+        set(SO_BASIC_PITCH_MODEL ${CMAKE_BINARY_DIR}/basic_pitch_ort/nmp.onnx)
+    endif()
     set(SO_BASIC_PITCH_FILES
-        ${CMAKE_SOURCE_DIR}/models/basic_pitch/nmp.onnx
+        ${SO_BASIC_PITCH_MODEL}
         ${CMAKE_SOURCE_DIR}/models/basic_pitch/LICENSE
         ${CMAKE_SOURCE_DIR}/models/basic_pitch/NOTICE)
 endif()
@@ -162,6 +168,9 @@ juce_add_plugin(SecondOpinion
     AU_MAIN_TYPE kAudioUnitType_Effect
     COPY_PLUGIN_AFTER_BUILD ${SO_COPY_PLUGIN}
     NEEDS_WEB_BROWSER TRUE
+    # macOS Standalone: NSMicrophoneUsageDescription, required to read the audio input at all.
+    MICROPHONE_PERMISSION_ENABLED TRUE
+    MICROPHONE_PERMISSION_TEXT "Second Opinion listens to the audio input to read the chords you play."
     ${SO_WEBVIEW2_ARG})
 
 target_sources(SecondOpinion PRIVATE

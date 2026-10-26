@@ -3,6 +3,8 @@
 
 #include "core/song/MoodInterpreter.h"
 
+#include <cmath>
+
 using namespace so::song;
 using Catch::Approx;
 

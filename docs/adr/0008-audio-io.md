@@ -102,3 +102,18 @@ P6-02.
 - Each instance owns one drain thread that sleeps 50 ms between checks when idle.
 - The bridge (`WebBridge.cpp`) is wired by the integrator using the API documented at the top of
   `PluginProcessor.h`.
+
+## Follow-ups
+
+- **NFR-08 memory (recommended change, not made yet).** The capture buffer is allocated in
+  `prepareToPlay` and held for the life of the instance: about 49 MB at 48 kHz (64 bars at
+  120 BPM), up to 69 MB at the 3 minute cap, twice that at 96 kHz. With several instances open
+  that alone breaks the < 120 MB idle budget. Recommended: allocate the FIFO and capture buffer
+  on the message thread when the user arms capture (`armCapture()`), publish it to the audio
+  thread through an atomic pointer (or the existing armed flag set after the allocation
+  completes), and free it on the message thread after `takeCapturedClip()` or disarm, once the
+  audio thread has acknowledged it stopped writing. `processBlock` keeps doing no allocation;
+  `prepareToPlay` only records the sample rate and block size. Size the buffer from the host
+  tempo at arm time (`CaptureMath`), and if the sample rate changes while armed, re-arm. Extend
+  `tests/rt` with an arm/disarm cycle under the allocation trap. Target: P6-02 (multi-instance
+  memory profiling).

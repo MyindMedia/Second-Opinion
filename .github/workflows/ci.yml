@@ -49,17 +49,28 @@ jobs:
             os: ubuntu-24.04
             preset: linux
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
-        with: { lfs: true }
+        with: { lfs: true }   # models/basic_pitch/nmp.onnx and tests/fixtures/*.wav are LFS objects
+
+      - name: LFS objects are real files
+        shell: bash
+        run: |
+          if head -c 40 models/basic_pitch/nmp.onnx | grep -q "git-lfs"; then
+            echo "::error::nmp.onnx is an LFS pointer (LFS checkout failed or quota exhausted)"; exit 1
+          fi
 
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm, cache-dependency-path: ui/package-lock.json }
 
+      # CPM sources (JUCE, Catch2) and the ONNX Runtime archive (SO_ORT_DOWNLOAD_DIR defaults to
+      # <CPM_SOURCE_CACHE>/onnxruntime), shared by the Debug and Release configures.
       - uses: actions/cache@v4
         with:
           path: .cpm-cache
-          key: cpm-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
+          key: cpm-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cmake/OnnxRuntime.cmake') }}
+          restore-keys: cpm-${{ runner.os }}-
 
       - name: Linux dependencies
         if: runner.os == 'Linux'
@@ -71,9 +82,12 @@ jobs:
       - name: WebView2 SDK (static linking, NEEDS_WEBVIEW2)
         if: runner.os == 'Windows'
         shell: pwsh
+        # JUCE's FindWebView2 searches %USERPROFILE%/AppData/Local/PackageManagement/NuGet/Packages;
+        # 1.0.3485.44 is the version JUCE 9.0.4 documents.
         run: |
+          Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Scope CurrentUser -Force | Out-Null
           Register-PackageSource -ProviderName NuGet -Name nugetRepository -Location https://www.nuget.org/api/v2 -Force -ErrorAction SilentlyContinue
-          Install-Package Microsoft.Web.WebView2 -Scope CurrentUser -RequiredVersion 1.0.1901.177 -Source nugetRepository -Force
+          Install-Package Microsoft.Web.WebView2 -Scope CurrentUser -RequiredVersion 1.0.3485.44 -Source nugetRepository -Force
 
       # ---- Debug: unit + real-time safety tests
       - name: Configure (Debug)
@@ -103,6 +117,11 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           # SO_COPY_PLUGIN=ON in the mac preset installs the AU into ~/Library/Audio/Plug-Ins/Components
+          # (the Release build runs last, so the installed copy is the Release one). Copying the
+          # build-tree bundle again makes this independent of JUCE's copy step.
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          rm -rf ~/Library/Audio/Plug-Ins/Components/"Second Opinion.component"
+          cp -R "build/mac-universal-release/SecondOpinion_artefacts/Release/AU/Second Opinion.component" ~/Library/Audio/Plug-Ins/Components/
           killall -9 AudioComponentRegistrar || true
           auval -a | grep -i "Brmt" || true
           auval -v aufx SOp1 Brmt
