@@ -14,7 +14,8 @@ namespace
     constexpr float kPeakFloorRelative = 1.0e-3f;   // -60 dB below the frame's strongest peak
     constexpr float kPeakFloorAbsolute = 1.0e-5f;   // sine amplitude, about -100 dBFS
     constexpr float kHarmonicSubtract = 0.8f;       // fraction of the 1/h harmonic model removed
-    constexpr int kNumHarmonics = 8;
+    constexpr int kNumHarmonics = 10;
+    constexpr float kMaxBassBrightness = 0.9f;      // partial h at most 0.9^log2(h) of the fundamental
     constexpr float kLogGain = 30.0f;               // log1p(kLogGain * amplitude)
 
     constexpr double kTuningMinHz = 80.0;
@@ -90,18 +91,44 @@ std::array<float, kNumPitches> ChromaExtractor::pitchSalience (const std::vector
         return o;
     }();
 
+    //    Bass notes (below the chroma split) get an adaptive model: bass sounds range from
+    //    nearly pure to overdriven, and a bright bass's 3rd partial (a 12th up) otherwise reads as
+    //    a real fifth in the chord register, turning Ab/C into Cm. Their brightness b is the
+    //    median of the estimates from partials 2, 3 and 4 (a real chord note on one of them
+    //    inflates one estimate, phase cancellation against one deflates another), and partial h
+    //    is modelled as r * b^log2(h), which is the 1/h model at b = 0.5.
+    static const std::array<float, kNumHarmonics + 1> log2h = []
+    {
+        std::array<float, kNumHarmonics + 1> l {};
+        for (int h = 1; h <= kNumHarmonics; ++h)
+            l[(size_t) h] = (float) std::log2 ((double) h);
+        return l;
+    }();
+
     for (int i = 0; i < kNumPitches; ++i)
     {
         const float r = p[(size_t) i];
         if (r <= 0.0f)
             continue;
+
+        float bright = 0.5f;
+        if (kLowestPitch + i < kBassSplit && i + offsets[5] < kNumPitches)
+        {
+            std::array<float, 4> b {};
+            for (int h = 2; h <= 5; ++h)
+                b[(size_t) h - 2] = std::pow (p[(size_t) (i + offsets[(size_t) h])] / r, 1.0f / log2h[(size_t) h]);
+            std::sort (b.begin(), b.end());
+            bright = std::clamp (b[1], 0.5f, kMaxBassBrightness);
+        }
+
         for (int h = 2; h <= kNumHarmonics; ++h)
         {
             const int t = i + offsets[(size_t) h];
             if (t >= kNumPitches)
                 break;
+            const float model = bright <= 0.5f ? 1.0f / (float) h : std::pow (bright, log2h[(size_t) h]);
             auto& v = p[(size_t) t];
-            v = std::max (0.0f, v - kHarmonicSubtract * r / (float) h);
+            v = std::max (0.0f, v - kHarmonicSubtract * r * model);
         }
     }
 
