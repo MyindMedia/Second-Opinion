@@ -150,6 +150,8 @@ export interface Song {
   interpretedAs?: string;      // one line, e.g. "Dark, late-night R&B with a hopeful chorus"
   arc: string;                 // one line on the energy shape of the whole song
   sections: SongSection[];
+  generation?: number;         // native id of this build, for restoreSnapshot (undo)
+  restored?: boolean;          // replayed from a saved project, not a new build
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -226,6 +228,30 @@ export interface ParseChordResult extends Ack {
   symbol?: string;
 }
 
+/** The settings C++ honours (FR-SET). The UI sends its whole Settings object; other fields are
+    stored with the session and ignored natively (chord naming stays Pop on the bridge). */
+export interface SettingsPayload {
+  quality: 'fast' | 'balanced' | 'accurate';                 // analysis quality
+  sourceHint: 'auto' | 'vocal' | 'keys' | 'guitar' | 'loop'; // analysis source hint
+  previewSound: 'keys' | 'pad' | 'off';
+  ppq: 480 | 960;                                            // MIDI export resolution
+  velocity: 'flat' | 'humanized';                            // MIDI export velocities
+}
+
+export interface ClearCacheResult extends Ack {
+  removed: number;             // files deleted from the captured-audio cache
+}
+
+/** Undo/redo (FR-ST-02): the state the UI went back (or forward) to. Every field is optional. */
+export interface SnapshotPayload {
+  /** Segment chords (ASCII symbols) and flags; unknown ids are ignored. */
+  segments?: { id: string; symbol: string; confidence: number; userLocked: boolean; userCorrected: boolean }[];
+  /** suggestionsReady.generation of the set to make current. */
+  generation?: number;
+  /** null: no song. Otherwise the song's generation and each section's chosen option. */
+  song?: { generation?: number; chosen: number[] } | null;
+}
+
 /** Native functions (JS → C++). Argument lists are positional, exactly as listed. */
 export interface NativeFunctions {
   startCapture(): Ack;
@@ -247,6 +273,9 @@ export interface NativeFunctions {
   setAiKey(key: string): AiStatus;
   getAiStatus(): AiStatus;
   parseChord(symbol: string): ParseChordResult;
+  setSettings(settings: SettingsPayload): Ack;
+  clearCache(): ClearCacheResult;
+  restoreSnapshot(snapshot: SnapshotPayload): Ack;
 }
 
 export type NativeFunctionName = keyof NativeFunctions;
@@ -254,7 +283,7 @@ export type NativeFunctionName = keyof NativeFunctions;
 export const NATIVE_FUNCTIONS: readonly NativeFunctionName[] = [
   'startCapture', 'stopCapture', 'setTempo', 'openAudioFile', 'analyzePcm', 'cancel', 'setChord', 'lock', 'generate',
   'audition', 'buildSong', 'chooseSectionOption', 'setProgression', 'exportMidi', 'getSession',
-  'setSessionValue', 'setAiKey', 'getAiStatus', 'parseChord',
+  'setSessionValue', 'setAiKey', 'getAiStatus', 'parseChord', 'setSettings', 'clearCache', 'restoreSnapshot',
 ];
 
 // ---------------------------------------------------------------------------------------------
@@ -282,6 +311,8 @@ export interface SuggestionsReadyEvent {
   schemaVersion: SchemaVersion;
   seed: number;
   suggestions: Suggestion[];
+  generation?: number;         // native id of this set, for restoreSnapshot (undo)
+  selectedId?: string;         // only when replayed from a saved project: the card to select
 }
 
 export interface AuditionStateEvent {

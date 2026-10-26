@@ -43,6 +43,7 @@ export interface State {
   analysis?: AnalysisResult;
   keyOverride?: string;
   suggestions: Suggestion[];
+  generation?: number;             // native id of the current suggestion set (undo, restoreSnapshot)
   seed: number;
   generating: boolean;
   selectedSuggestionId?: string;

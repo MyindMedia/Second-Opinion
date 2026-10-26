@@ -107,9 +107,16 @@ public:
 
     juce::AudioProcessorValueTreeState apvts;
 
-    /** Session state saved with the project (PRD §7.7). Message thread only. */
+    /** Session state saved with the project (PRD §7.7, ADR 0011). Written on the message thread;
+        getStateInformation may run on another host thread, so writers that replace whole children
+        and the state copy take sessionLock. The "Engine" child is the SessionEngine's state. */
     juce::ValueTree session { "Session" };
-    static constexpr int stateVersion = 1;
+    juce::CriticalSection sessionLock;
+    static constexpr int stateVersion = 2;
+
+    /** Forward migration of a loaded Session tree (1 -> 2: version stamp only; the engine state
+        and settings are read from what v1 already stored). */
+    static void migrateSession (juce::ValueTree& tree);
 
     /** The progression the DragStrip exports (set from the UI via the bridge). Message thread only. */
     struct Progression
@@ -155,8 +162,9 @@ public:
 
 private:
     std::unique_ptr<SessionEngine> engine;
+    std::shared_ptr<std::atomic<bool>> aliveFlag = std::make_shared<std::atomic<bool>> (true);
 
-    static void migrateSession (juce::ValueTree& tree);
+    void restoreEngineFromSession();
 
     struct HostPosition
     {

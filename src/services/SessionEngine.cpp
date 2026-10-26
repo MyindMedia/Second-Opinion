@@ -1,5 +1,10 @@
 #include "SessionEngine.h"
 
+#include "AudioCache.h"
+
+#include <cstdio>
+#include <limits>
+
 #include "bridge/Json.h"
 #include "core/analysis/Analyzer.h"
 #include "core/analysis/TempoEstimator.h"
@@ -42,6 +47,7 @@ SessionEngine::~SessionEngine()
     alive->store (false);
     cancelFlag->store (true);
     pool.removeAllJobs (true, 10000);
+    ioPool.removeAllJobs (true, 10000);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -115,6 +121,14 @@ void SessionEngine::analyze (so::analysis::AudioClip clip, so::analysis::BeatGri
     auto cancelPtr = cancelFlag;
     auto aliveFlag = alive;
     auto settings = currentSettings (0);
+    auto options = analyzerOptions();
+
+    // FR-ST-01 AC3: captured audio goes to the local cache (hash only in the project).
+    auto clipPtr = std::make_shared<const so::analysis::AudioClip> (std::move (clip));
+    ++analysisSerial;
+    cacheHash.clear();
+    if (src == "captured")
+        startCacheWrite (clipPtr);
 
     auto post = [this, aliveFlag, gen] (std::function<void()> fn)
     {
@@ -125,9 +139,9 @@ void SessionEngine::analyze (so::analysis::AudioClip clip, so::analysis::BeatGri
         });
     };
 
-    pool.addJob ([this, clip = std::move (clip), grid, src, name, cancelPtr, settings, post]
+    pool.addJob ([this, clipPtr, grid, src, name, cancelPtr, settings, options, post]() mutable
     {
-        so::analysis::AnalyzerOptions options;
+        const auto& clip = *clipPtr;
         std::atomic<float> lastSent { -1.0f };
 
         auto progress = [&] (int stage, float pct)
@@ -183,19 +197,27 @@ void SessionEngine::analyze (so::analysis::AudioClip clip, so::analysis::BeatGri
         if (cancelPtr->load())
             return;
 
-        post ([this, result = std::move (result), list = std::move (list), src, name]() mutable
+        post ([this, result = std::move (result), list = std::move (list), src, name, settings]() mutable
         {
             analysisResult = std::move (result);
             source = src;
             sourceName = name;
-            suggestionList = std::move (list);
-            suggestionSeed = 0;
+            generations.clear();
+            songs.clear();
             song.reset();
+
+            Generation g;
+            g.settings = settings;
+            g.input = std::make_shared<const so::analysis::AnalysisResult> (*analysisResult);
+            g.list = std::move (list);
+            pushGeneration (std::move (g));
+            persist();
+
             emitProgress ("suggestions", 1.0f);
             if (emit)
             {
                 emit ("analysisReady", json::analysis (*analysisResult, source, sourceName));
-                emit ("suggestionsReady", json::suggestions (suggestionList, suggestionSeed));
+                emit ("suggestionsReady", suggestionsPayload());
             }
         });
     });
@@ -416,6 +438,7 @@ var SessionEngine::setChord (const juce::String& segmentId, const juce::String& 
             s.confidence = 1.0f;
             s.userCorrected = true;
             s.userLocked = true;
+            persist();
             return json::object ({ { "ok", true }, { "symbol", json::symbol (s.chord) } });
         }
     }
@@ -436,6 +459,7 @@ var SessionEngine::lock (const var& segmentIds, bool locked)
         if (ids.contains (juce::String (s.id)))
             s.userLocked = locked;
 
+    persist();
     return json::ack (true);
 }
 
@@ -449,21 +473,27 @@ var SessionEngine::generate (std::uint64_t seed)
 
     const int gen = ++jobGeneration;
     auto aliveFlag = alive;
-    auto analysisCopy = *analysisResult;
+    auto analysisCopy = std::make_shared<const so::analysis::AnalysisResult> (*analysisResult);
     auto settings = currentSettings (seed);
     auto locked = lockedIds();
 
-    pool.addJob ([this, aliveFlag, gen, analysisCopy = std::move (analysisCopy), settings, locked, seed]
+    pool.addJob ([this, aliveFlag, gen, analysisCopy, settings, locked, seed]
     {
-        auto list = so::reharm::generate (analysisCopy, settings, locked);
-        juce::MessageManager::callAsync ([this, aliveFlag, gen, list = std::move (list), seed]() mutable
+        auto list = so::reharm::generate (*analysisCopy, settings, locked);
+        juce::MessageManager::callAsync ([this, aliveFlag, gen, list = std::move (list), seed, analysisCopy, settings, locked]() mutable
         {
             if (! aliveFlag->load() || gen != jobGeneration)
                 return;
-            suggestionList = std::move (list);
-            suggestionSeed = seed;
+            Generation g;
+            g.seed = seed;
+            g.settings = settings;
+            g.locks = locked;
+            g.input = analysisCopy;
+            g.list = std::move (list);
+            pushGeneration (std::move (g));
+            persist();
             if (emit)
-                emit ("suggestionsReady", json::suggestions (suggestionList, suggestionSeed));
+                emit ("suggestionsReady", suggestionsPayload());
         });
     });
 
@@ -568,11 +598,11 @@ void SessionEngine::runSongBuild (const var& request, juce::String aiJson, bool 
 
     emitProgress ("song", 0.2f);
 
-    pool.addJob ([this, aliveFlag, gen, analysisCopy = std::move (analysisCopy), req, aiJson, bpm]
+    pool.addJob ([this, aliveFlag, gen, analysisCopy = std::move (analysisCopy), req, aiJson, bpm, request]
     {
         auto built = SongBridge::build (analysisCopy, req, aiJson.toStdString(), bpm);
 
-        juce::MessageManager::callAsync ([this, aliveFlag, gen, built = std::move (built)]() mutable
+        juce::MessageManager::callAsync ([this, aliveFlag, gen, built = std::move (built), analysisCopy, aiJson, bpm, request]() mutable
         {
             if (! aliveFlag->load() || gen != jobGeneration)
                 return;
@@ -581,11 +611,19 @@ void SessionEngine::runSongBuild (const var& request, juce::String aiJson, bool 
                 emitError ("song_failed", built.error.isNotEmpty() ? built.error : juce::String ("The song couldn't be built. Try again."));
                 return;
             }
-            song = std::move (built.song);
-            songMeta = built.meta;
+            SongRecord rec;
+            rec.request = request;
+            rec.aiJson = built.meta.interpreter == "online" ? aiJson : juce::String();
+            rec.bpm = bpm;
+            if (analysisCopy)
+                rec.idea = std::make_shared<const so::analysis::AnalysisResult> (*analysisCopy);
+            rec.song = std::move (built.song);
+            rec.meta = built.meta;
+            adoptSong (std::move (rec));
+            persist();
             emitProgress ("song", 1.0f);
             if (emit)
-                emit ("songReady", SongBridge::toJson (*song, songMeta));
+                emit ("songReady", songPayload (false));
         });
     });
 }
@@ -594,6 +632,7 @@ var SessionEngine::chooseSectionOption (int sectionIndex, int optionIndex)
 {
     if (song == nullptr || ! SongBridge::choose (*song, sectionIndex, optionIndex))
         return json::ack (false);
+    persist();
     return json::ack (true);
 }
 
@@ -604,8 +643,923 @@ void SessionEngine::replay()
     if (analysisResult)
     {
         emit ("analysisReady", json::analysis (*analysisResult, source, sourceName));
-        emit ("suggestionsReady", json::suggestions (suggestionList, suggestionSeed));
+        auto payload = suggestionsPayload();
+        const auto selected = processor.session.getProperty ("ui_selected", {}).toString();
+        if (selected.isNotEmpty())
+            payload.getDynamicObject()->setProperty ("selectedId", selected);
+        emit ("suggestionsReady", payload);
     }
     if (song != nullptr)
-        emit ("songReady", SongBridge::toJson (*song, songMeta));
+        emit ("songReady", songPayload (true));
+}
+
+// ---------------------------------------------------------------------------------------------
+// History, payloads
+// ---------------------------------------------------------------------------------------------
+void SessionEngine::pushGeneration (Generation g)
+{
+    g.id = nextId++;
+    suggestionList = g.list;
+    suggestionSeed = g.seed;
+    currentGenId = g.id;
+    generations.push_back (std::move (g));
+    while (generations.size() > maxHistory)
+        generations.pop_front();
+}
+
+SessionEngine::Generation* SessionEngine::findGeneration (int id)
+{
+    for (auto& g : generations)
+        if (g.id == id)
+            return &g;
+    return nullptr;
+}
+
+void SessionEngine::adoptSong (SongRecord rec)
+{
+    rec.id = nextId++;
+    song = rec.song;
+    songMeta = rec.meta;
+    currentSongId = rec.id;
+    songs.push_back (std::move (rec));
+    while (songs.size() > maxHistory)
+        songs.pop_front();
+}
+
+void SessionEngine::clearSession()
+{
+    ++jobGeneration;
+    analysisResult.reset();
+    source = "captured";
+    sourceName.clear();
+    suggestionList.clear();
+    suggestionSeed = 0;
+    generations.clear();
+    songs.clear();
+    song.reset();
+    songMeta = {};
+    currentGenId = currentSongId = 0;
+    cacheHash.clear();
+}
+
+juce::var SessionEngine::suggestionsPayload() const
+{
+    auto payload = json::suggestions (suggestionList, suggestionSeed);
+    payload.getDynamicObject()->setProperty ("generation", currentGenId);
+    return payload;
+}
+
+juce::var SessionEngine::songPayload (bool restored) const
+{
+    if (song == nullptr)
+        return {};
+    auto payload = SongBridge::toJson (*song, songMeta);
+    payload.getDynamicObject()->setProperty ("generation", currentSongId);
+    if (restored)
+        payload.getDynamicObject()->setProperty ("restored", true);
+    return payload;
+}
+
+std::vector<std::uint64_t> SessionEngine::seedHistory() const
+{
+    std::vector<std::uint64_t> seeds;
+    for (const auto& g : generations)
+        seeds.push_back (g.seed);
+    if (seeds.size() > savedGenerations)
+        seeds.erase (seeds.begin(), seeds.end() - (std::ptrdiff_t) savedGenerations);
+    return seeds;
+}
+
+void SessionEngine::adoptAnalysis (so::analysis::AnalysisResult result, const juce::String& src, const juce::String& name)
+{
+    ++jobGeneration;
+    const auto settings = currentSettings (0);
+    auto list = so::reharm::generate (result, settings, {});
+
+    analysisResult = std::move (result);
+    source = src;
+    sourceName = name;
+    generations.clear();
+    songs.clear();
+    song.reset();
+    currentSongId = 0;
+
+    Generation g;
+    g.settings = settings;
+    g.input = std::make_shared<const so::analysis::AnalysisResult> (*analysisResult);
+    g.list = std::move (list);
+    pushGeneration (std::move (g));
+    persist();
+}
+
+bool SessionEngine::generateNow (std::uint64_t seed)
+{
+    if (! analysisResult)
+        return false;
+    ++jobGeneration;
+    Generation g;
+    g.seed = seed;
+    g.settings = currentSettings (seed);
+    g.locks = lockedIds();
+    g.input = std::make_shared<const so::analysis::AnalysisResult> (*analysisResult);
+    g.list = so::reharm::generate (*g.input, g.settings, g.locks);
+    pushGeneration (std::move (g));
+    persist();
+    return true;
+}
+
+bool SessionEngine::buildSongNow (const var& request, const juce::String& aiJson)
+{
+    ++jobGeneration;
+    const auto bpm = analysisResult ? analysisResult->grid.bpm : sessionBpm();
+    auto built = SongBridge::build (analysisResult, SongBridge::parseRequest (request), aiJson.toStdString(), bpm);
+    if (built.song == nullptr)
+        return false;
+
+    SongRecord rec;
+    rec.request = request;
+    rec.aiJson = built.meta.interpreter == "online" ? aiJson : juce::String();
+    rec.bpm = bpm;
+    if (analysisResult)
+        rec.idea = std::make_shared<const so::analysis::AnalysisResult> (*analysisResult);
+    rec.song = std::move (built.song);
+    rec.meta = built.meta;
+    adoptSong (std::move (rec));
+    persist();
+    return true;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Settings (FR-SET) and the audio cache
+// ---------------------------------------------------------------------------------------------
+so::analysis::AnalyzerOptions SessionEngine::analyzerOptions() const
+{
+    so::analysis::AnalyzerOptions o;
+    o.quality = prefs.quality;
+    o.source = prefs.source;
+    return o;
+}
+
+namespace
+{
+    var settingsObject (const var& v)
+    {
+        if (v.isString())
+            return juce::JSON::parse (v.toString());
+        return v;
+    }
+}
+
+var SessionEngine::setSettings (const var& raw)
+{
+    const auto v = settingsObject (raw);
+    if (v.getDynamicObject() == nullptr)
+        return json::ack (false, "Settings must be an object.");
+
+    using Q = so::analysis::AnalysisQuality;
+    using S = so::analysis::SourceHint;
+
+    if (v.hasProperty ("quality"))
+    {
+        const auto q = v["quality"].toString();
+        prefs.quality = q == "fast" ? Q::Fast : q == "accurate" ? Q::Accurate : Q::Balanced;
+    }
+    if (v.hasProperty ("sourceHint"))
+    {
+        const auto h = v["sourceHint"].toString();
+        prefs.source = h == "vocal" ? S::Vocal : h == "keys" ? S::Keys : h == "guitar" ? S::Guitar
+                     : h == "loop" ? S::Loop : S::Auto;
+    }
+    if (v.hasProperty ("ppq"))
+        prefs.ppq = (int) v["ppq"] == 480 ? 480 : 960;
+    if (v.hasProperty ("velocity"))
+        prefs.humanize = v["velocity"].toString() != "flat";
+    if (v.hasProperty ("previewSound"))
+    {
+        using PS = SecondOpinionProcessor::PreviewSound;
+        const auto p = v["previewSound"].toString();
+        processor.setPreviewSound (p == "pad" ? PS::Pad : p == "off" ? PS::Off : PS::Keys);
+    }
+
+    {
+        const juce::ScopedLock sl (processor.sessionLock);
+        processor.session.setProperty ("ui_settings", juce::JSON::toString (v, true), nullptr);
+    }
+    return json::ack (true);
+}
+
+void SessionEngine::loadSettingsFromSession()
+{
+    prefs = {};
+    const auto text = processor.session.getProperty ("ui_settings", {}).toString();
+    if (text.isNotEmpty())
+        setSettings (text);
+}
+
+var SessionEngine::clearCache()
+{
+    const int removed = so::cache::clear();
+    return json::object ({ { "ok", true }, { "removed", removed } });
+}
+
+void SessionEngine::startCacheWrite (std::shared_ptr<const so::analysis::AudioClip> clip)
+{
+    auto aliveFlag = alive;
+    const int serial = analysisSerial;
+    ioPool.addJob ([this, aliveFlag, serial, clip]
+    {
+        const auto hash = so::cache::hashClip (*clip);
+        so::cache::writeClip (*clip, hash, so::cache::cacheDirectory());
+        juce::MessageManager::callAsync ([this, aliveFlag, serial, hash]
+        {
+            if (! aliveFlag->load() || serial != analysisSerial)
+                return;
+            cacheHash = hash;
+            persist();
+        });
+    });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Undo / redo (FR-ST-02)
+// ---------------------------------------------------------------------------------------------
+var SessionEngine::restoreSnapshot (const var& snap)
+{
+    bool ok = true;
+
+    if (analysisResult)
+    {
+        if (const auto* segs = snap.getProperty ("segments", {}).getArray())
+        {
+            for (const auto& v : *segs)
+            {
+                const auto id = v.getProperty ("id", {}).toString();
+                for (auto& s : analysisResult->segments)
+                {
+                    if (juce::String (s.id) != id)
+                        continue;
+                    if (v.hasProperty ("symbol"))
+                    {
+                        if (auto chord = so::theory::ChordSymbolParser::tryParse (v["symbol"].toString().toStdString()))
+                        {
+                            if (! (*chord == s.chord))
+                                s.chord = *chord;
+                        }
+                        else
+                            ok = false;
+                    }
+                    if (v.hasProperty ("confidence"))
+                        s.confidence = juce::jlimit (0.0f, 1.0f, (float) (double) v["confidence"]);
+                    if (v.hasProperty ("userLocked"))
+                        s.userLocked = (bool) v["userLocked"];
+                    if (v.hasProperty ("userCorrected"))
+                        s.userCorrected = (bool) v["userCorrected"];
+                }
+            }
+        }
+    }
+
+    const int genId = (int) snap.getProperty ("generation", 0);
+    if (genId > 0 && genId != currentGenId)
+    {
+        if (auto* g = findGeneration (genId))
+        {
+            if (g->list.empty() && analysisResult)
+                g->list = so::reharm::generate (g->input ? *g->input : *analysisResult, g->settings, g->locks);
+            ++jobGeneration;   // a generate still in flight would overwrite the restored set
+            suggestionList = g->list;
+            suggestionSeed = g->seed;
+            currentGenId = g->id;
+        }
+        else
+            ok = false;
+    }
+
+    if (snap.hasProperty ("song"))
+    {
+        const auto s = snap["song"];
+        if (s.isVoid() || s.isUndefined() || (s.getDynamicObject() == nullptr && ! s.isObject()))
+        {
+            song.reset();
+            currentSongId = 0;
+        }
+        else
+        {
+            const int songId = (int) s.getProperty ("generation", 0);
+            if (songId > 0 && songId != currentSongId)
+            {
+                const SongRecord* found = nullptr;
+                for (const auto& r : songs)
+                    if (r.id == songId)
+                        found = &r;
+                if (found != nullptr)
+                {
+                    song = found->song;
+                    songMeta = found->meta;
+                    currentSongId = found->id;
+                }
+                else
+                    ok = false;
+            }
+            if (song != nullptr)
+                if (const auto* chosen = s.getProperty ("chosen", {}).getArray())
+                    for (int i = 0; i < juce::jmin (chosen->size(), (int) song->sections.size()); ++i)
+                        if (song->sections[(size_t) i].repeatOf < 0 && song->sections[(size_t) i].chosen != (int) (*chosen)[i])
+                            SongBridge::choose (*song, i, (int) (*chosen)[i]);
+        }
+    }
+
+    persist();
+    return json::ack (ok);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Save and recall (FR-ST-01, docs/adr/0011-session-persistence.md)
+// ---------------------------------------------------------------------------------------------
+namespace
+{
+    // Every number is written by hand: %.17g round-trips doubles exactly, JUCE's var does not above 1e6.
+    juce::String num (double v)
+    {
+        char buf[40];
+        std::snprintf (buf, sizeof (buf), "%.17g", v);
+        return juce::String (buf);
+    }
+
+    std::optional<double> readNum (const juce::ValueTree& t, const juce::Identifier& id)
+    {
+        if (! t.hasProperty (id))
+            return std::nullopt;
+        const auto s = t.getProperty (id).toString().trim();
+        if (s.isEmpty() || ! s.containsOnly ("0123456789+-.eE"))
+            return std::nullopt;
+        const double v = s.getDoubleValue();
+        return std::isfinite (v) ? std::optional<double> (v) : std::nullopt;
+    }
+
+    std::optional<int> readInt (const juce::ValueTree& t, const juce::Identifier& id, int lo, int hi)
+    {
+        const auto v = readNum (t, id);
+        if (! v || *v != std::floor (*v) || *v < lo || *v > hi)
+            return std::nullopt;
+        return (int) *v;
+    }
+
+    std::uint64_t readU64 (const juce::ValueTree& t, const juce::Identifier& id)
+    {
+        const auto s = t.getProperty (id).toString().trim();
+        if (s.isEmpty() || ! s.containsOnly ("0123456789") || s.length() > 18)
+            return 0;
+        return (std::uint64_t) s.getLargeIntValue();
+    }
+
+    juce::String pitchCode (const so::theory::SpelledPitch& p)
+    {
+        return juce::String ((int) p.letter) + "," + juce::String (p.accidental);
+    }
+
+    juce::String chordCode (const so::theory::Chord& c)
+    {
+        auto s = pitchCode (c.root) + "," + juce::String ((int) c.quality);
+        if (c.bass)
+            s << "," << pitchCode (*c.bass);
+        return s;
+    }
+
+    std::optional<so::theory::SpelledPitch> pitchFrom (const juce::StringArray& t, int i)
+    {
+        if (i + 1 >= t.size() || ! t[i].containsOnly ("0123456789") || ! t[i + 1].containsOnly ("-0123456789")
+            || t[i].isEmpty() || t[i + 1].isEmpty())
+            return std::nullopt;
+        const int letter = t[i].getIntValue(), acc = t[i + 1].getIntValue();
+        if (letter < 0 || letter > 6 || acc < -2 || acc > 2)
+            return std::nullopt;
+        return so::theory::SpelledPitch { (so::theory::Letter) letter, acc };
+    }
+
+    std::optional<so::theory::Chord> chordFrom (const juce::String& code)
+    {
+        const auto t = juce::StringArray::fromTokens (code, ",", "");
+        if (t.size() != 3 && t.size() != 5)
+            return std::nullopt;
+        auto root = pitchFrom (t, 0);
+        if (! root || t[2].isEmpty() || ! t[2].containsOnly ("0123456789"))
+            return std::nullopt;
+        const int q = t[2].getIntValue();
+        if (q < 0 || q >= so::theory::numChordQualities)
+            return std::nullopt;
+        so::theory::Chord c;
+        c.root = *root;
+        c.quality = (so::theory::ChordQuality) q;
+        if (t.size() == 5)
+        {
+            auto bass = pitchFrom (t, 3);
+            if (! bass)
+                return std::nullopt;
+            c.bass = *bass;
+        }
+        return c;
+    }
+
+    // Melody: "t1:" + base64 of zigzag varints (pitch delta, start delta, length), ticks of 1/960
+    // beat, delta-encoded (PRD 7.7). Falls back to "d:" text doubles when a value is off that grid.
+    constexpr double ticksPerBeat = 960.0;
+
+    void putVarint (juce::MemoryOutputStream& out, std::int64_t v)
+    {
+        auto z = (std::uint64_t) ((v << 1) ^ (v >> 63));
+        while (z >= 0x80)
+        {
+            out.writeByte ((char) (std::uint8_t) (z | 0x80));
+            z >>= 7;
+        }
+        out.writeByte ((char) (std::uint8_t) z);
+    }
+
+    bool getVarint (const std::uint8_t*& p, const std::uint8_t* end, std::int64_t& v)
+    {
+        std::uint64_t z = 0;
+        for (int shift = 0; shift < 64; shift += 7)
+        {
+            if (p >= end)
+                return false;
+            const auto b = *p++;
+            z |= (std::uint64_t) (b & 0x7f) << shift;
+            if ((b & 0x80) == 0)
+            {
+                v = (std::int64_t) (z >> 1) ^ -(std::int64_t) (z & 1);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool onGrid (double beats, std::int64_t& ticks)
+    {
+        if (std::abs (beats) > 1.0e9)
+            return false;
+        ticks = (std::int64_t) std::llround (beats * ticksPerBeat);
+        return (double) ticks / ticksPerBeat == beats;
+    }
+
+    juce::String encodeMelody (const std::vector<so::analysis::MelodyNote>& melody)
+    {
+        juce::MemoryOutputStream out;
+        std::int64_t prevPitch = 60, prevStart = 0;
+        bool exact = true;
+        for (const auto& n : melody)
+        {
+            std::int64_t start = 0, len = 0;
+            if (! onGrid (n.startBeat, start) || ! onGrid (n.beats, len))
+            {
+                exact = false;
+                break;
+            }
+            putVarint (out, n.pitch - prevPitch);
+            putVarint (out, start - prevStart);
+            putVarint (out, len);
+            prevPitch = n.pitch;
+            prevStart = start;
+        }
+        if (exact)
+            return "t1:" + juce::Base64::toBase64 (out.getData(), out.getDataSize());
+
+        juce::String s ("d:");
+        for (const auto& n : melody)
+            s << n.pitch << "," << num (n.startBeat) << "," << num (n.beats) << ";";
+        return s;
+    }
+
+    std::optional<std::vector<so::analysis::MelodyNote>> decodeMelody (const juce::String& text)
+    {
+        constexpr size_t maxNotes = 100000;
+        std::vector<so::analysis::MelodyNote> out;
+        auto valid = [] (const so::analysis::MelodyNote& n)
+        {
+            return n.pitch >= 0 && n.pitch <= 127 && std::isfinite (n.startBeat) && std::isfinite (n.beats)
+                && n.startBeat >= 0.0 && n.beats > 0.0 && n.startBeat < 1.0e6 && n.beats < 1.0e6;
+        };
+
+        if (text.isEmpty())
+            return out;
+
+        if (text.startsWith ("t1:"))
+        {
+            juce::MemoryOutputStream bytes;
+            if (! juce::Base64::convertFromBase64 (bytes, text.substring (3)))
+                return std::nullopt;
+            auto* p = static_cast<const std::uint8_t*> (bytes.getData());
+            const auto* end = p + bytes.getDataSize();
+            std::int64_t pitch = 60, start = 0;
+            while (p < end)
+            {
+                std::int64_t dp = 0, ds = 0, len = 0;
+                if (! getVarint (p, end, dp) || ! getVarint (p, end, ds) || ! getVarint (p, end, len) || out.size() >= maxNotes)
+                    return std::nullopt;
+                if (std::abs (dp) > 256 || std::abs (ds) > (std::int64_t) 1.0e12 || std::abs (len) > (std::int64_t) 1.0e12)
+                    return std::nullopt;
+                pitch += dp;
+                start += ds;
+                so::analysis::MelodyNote n { (int) juce::jlimit<std::int64_t> (-1, 128, pitch), (double) start / ticksPerBeat, (double) len / ticksPerBeat };
+                if (! valid (n))
+                    return std::nullopt;
+                out.push_back (n);
+            }
+            return out;
+        }
+
+        if (text.startsWith ("d:"))
+        {
+            for (const auto& item : juce::StringArray::fromTokens (text.substring (2), ";", ""))
+            {
+                if (item.isEmpty())
+                    continue;
+                const auto f = juce::StringArray::fromTokens (item, ",", "");
+                if (f.size() != 3 || out.size() >= maxNotes)
+                    return std::nullopt;
+                for (const auto& x : f)
+                    if (x.isEmpty() || ! x.containsOnly ("0123456789+-.eE"))
+                        return std::nullopt;
+                so::analysis::MelodyNote n { f[0].getIntValue(), f[1].getDoubleValue(), f[2].getDoubleValue() };
+                if (! valid (n))
+                    return std::nullopt;
+                out.push_back (n);
+            }
+            return out;
+        }
+        return std::nullopt;
+    }
+
+    juce::ValueTree settingsToTree (const so::reharm::Settings& s)
+    {
+        juce::ValueTree t ("Settings");
+        t.setProperty ("tension", s.tension, nullptr);
+        t.setProperty ("smoothness", s.smoothness, nullptr);
+        t.setProperty ("families", (int) s.families, nullptr);
+        t.setProperty ("bassMotion", (int) s.bassMotion, nullptr);
+        t.setProperty ("pedalPc", s.pedalPc, nullptr);
+        t.setProperty ("pedalBars", s.pedalBars, nullptr);
+        t.setProperty ("rangeLow", s.rangeLow, nullptr);
+        t.setProperty ("rangeHigh", s.rangeHigh, nullptr);
+        t.setProperty ("bassLow", s.bassLow, nullptr);
+        t.setProperty ("bassHigh", s.bassHigh, nullptr);
+        t.setProperty ("density", s.density, nullptr);
+        t.setProperty ("melodyOnTop", (int) s.melodyOnTop, nullptr);
+        t.setProperty ("seed", juce::String ((juce::uint64) s.seed), nullptr);
+        t.setProperty ("maxSuggestions", s.maxSuggestions, nullptr);
+        return t;
+    }
+
+    so::reharm::Settings settingsFromTree (const juce::ValueTree& t)
+    {
+        so::reharm::Settings s;
+        auto get = [&] (const char* id, int lo, int hi, int fallback) { return readInt (t, id, lo, hi).value_or (fallback); };
+        s.tension = get ("tension", 0, 100, s.tension);
+        s.smoothness = get ("smoothness", 0, 100, s.smoothness);
+        s.families = (unsigned) get ("families", 0, (int) so::reharm::allFamilies, (int) s.families);
+        s.bassMotion = (so::reharm::BassMotion) get ("bassMotion", 0, 3, 0);
+        s.pedalPc = get ("pedalPc", -1, 11, s.pedalPc);
+        s.pedalBars = get ("pedalBars", 1, 64, s.pedalBars);
+        s.rangeLow = get ("rangeLow", 0, 127, s.rangeLow);
+        s.rangeHigh = get ("rangeHigh", 0, 127, s.rangeHigh);
+        s.bassLow = get ("bassLow", 0, 127, s.bassLow);
+        s.bassHigh = get ("bassHigh", 0, 127, s.bassHigh);
+        s.density = get ("density", 3, 6, s.density);
+        s.melodyOnTop = (so::reharm::MelodyOnTop) get ("melodyOnTop", 0, 3, 0);
+        s.seed = readU64 (t, "seed");
+        s.maxSuggestions = get ("maxSuggestions", 6, 12, s.maxSuggestions);
+        if (s.families == 0)
+            s.families = so::reharm::familyBit (so::reharm::Family::Diatonic);
+        return s.sanitized();
+    }
+
+    juce::String idList (const std::set<int>& ids)
+    {
+        juce::StringArray a;
+        for (int id : ids)
+            a.add (juce::String (id));
+        return a.joinIntoString (",");
+    }
+
+    std::set<int> idsFrom (const juce::String& s)
+    {
+        std::set<int> ids;
+        for (const auto& t : juce::StringArray::fromTokens (s, ",", ""))
+            if (t.isNotEmpty() && t.containsOnly ("-0123456789") && t.length() < 10 && ids.size() < 4096)
+                ids.insert (t.getIntValue());
+        return ids;
+    }
+
+    bool sameTree (const juce::ValueTree& a, const juce::ValueTree& b) { return a.isEquivalentTo (b); }
+}
+
+juce::ValueTree SessionEngine::analysisToTree (const so::analysis::AnalysisResult& a)
+{
+    juce::ValueTree t ("Analysis");
+    t.setProperty ("bpm", num (a.grid.bpm), nullptr);
+    t.setProperty ("beatsPerBar", a.grid.beatsPerBar, nullptr);
+    t.setProperty ("downbeatSec", num (a.grid.downbeatSec), nullptr);
+    t.setProperty ("bars", a.bars, nullptr);
+    t.setProperty ("key", pitchCode (a.key.tonic) + "," + juce::String ((int) a.key.mode), nullptr);
+    t.setProperty ("keyConfidence", num (a.keyConfidence), nullptr);
+    t.setProperty ("melody", encodeMelody (a.melody), nullptr);
+
+    for (const auto& s : a.segments)
+    {
+        juce::ValueTree seg ("Seg");
+        seg.setProperty ("id", s.id, nullptr);
+        seg.setProperty ("start", num (s.startBeat), nullptr);
+        seg.setProperty ("beats", num (s.beats), nullptr);
+        seg.setProperty ("chord", chordCode (s.chord), nullptr);
+        seg.setProperty ("confidence", num (s.confidence), nullptr);
+        if (s.userLocked)
+            seg.setProperty ("locked", 1, nullptr);
+        if (s.userCorrected)
+            seg.setProperty ("corrected", 1, nullptr);
+
+        juce::StringArray alts;
+        for (const auto& alt : s.alternatives)
+            alts.add (chordCode (alt.chord) + ":" + num (alt.confidence));
+        if (! alts.isEmpty())
+            seg.setProperty ("alts", alts.joinIntoString (";"), nullptr);
+        t.appendChild (seg, nullptr);
+    }
+    return t;
+}
+
+std::optional<so::analysis::AnalysisResult> SessionEngine::analysisFromTree (const juce::ValueTree& t)
+{
+    if (! t.isValid() || ! t.hasType ("Analysis") || t.getNumChildren() > 4096)
+        return std::nullopt;
+
+    so::analysis::AnalysisResult a;
+    const auto bpm = readNum (t, "bpm");
+    const auto bpb = readInt (t, "beatsPerBar", 1, 16);
+    const auto downbeat = readNum (t, "downbeatSec");
+    const auto bars = readInt (t, "bars", 1, 1024);
+    const auto keyConf = readNum (t, "keyConfidence");
+    if (! bpm || *bpm < 20.0 || *bpm > 400.0 || ! bpb || ! downbeat || std::abs (*downbeat) > 3600.0 || ! bars || ! keyConf)
+        return std::nullopt;
+
+    a.grid.bpm = *bpm;
+    a.grid.beatsPerBar = *bpb;
+    a.grid.downbeatSec = *downbeat;
+    a.bars = *bars;
+    a.keyConfidence = (float) juce::jlimit (0.0, 1.0, *keyConf);
+
+    const auto keyTokens = juce::StringArray::fromTokens (t.getProperty ("key").toString(), ",", "");
+    const auto tonic = pitchFrom (keyTokens, 0);
+    if (keyTokens.size() != 3 || ! tonic || (keyTokens[2] != "0" && keyTokens[2] != "1"))
+        return std::nullopt;
+    a.key.tonic = *tonic;
+    a.key.mode = keyTokens[2] == "1" ? so::theory::Mode::Minor : so::theory::Mode::Major;
+
+    auto melody = decodeMelody (t.getProperty ("melody").toString());
+    if (! melody)
+        return std::nullopt;
+    a.melody = std::move (*melody);
+
+    const double totalBeats = (double) a.bars * a.grid.beatsPerBar;
+    double lastStart = 0.0;
+    std::set<int> ids;
+    for (const auto& seg : t)
+    {
+        if (! seg.hasType ("Seg"))
+            return std::nullopt;
+        so::analysis::ChordSegment s;
+        const auto id = readInt (seg, "id", 0, 1000000);
+        const auto start = readNum (seg, "start");
+        const auto beats = readNum (seg, "beats");
+        const auto conf = readNum (seg, "confidence");
+        const auto chord = chordFrom (seg.getProperty ("chord").toString());
+        if (! id || ! start || ! beats || ! conf || ! chord || ! ids.insert (*id).second)
+            return std::nullopt;
+        if (*start < lastStart || *beats <= 0.0 || *start + *beats > totalBeats + 1.0e-6)
+            return std::nullopt;
+        lastStart = *start;
+
+        s.id = *id;
+        s.startBeat = *start;
+        s.beats = *beats;
+        s.chord = *chord;
+        s.confidence = (float) juce::jlimit (0.0, 1.0, *conf);
+        s.userLocked = (int) seg.getProperty ("locked", 0) == 1;
+        s.userCorrected = (int) seg.getProperty ("corrected", 0) == 1;
+
+        for (const auto& item : juce::StringArray::fromTokens (seg.getProperty ("alts").toString(), ";", ""))
+        {
+            if (item.isEmpty())
+                continue;
+            const auto alt = chordFrom (item.upToFirstOccurrenceOf (":", false, false));
+            const auto c = item.fromFirstOccurrenceOf (":", false, false);
+            if (! alt || c.isEmpty() || ! c.containsOnly ("0123456789+-.eE") || s.alternatives.size() >= 8)
+                return std::nullopt;
+            const double cv = c.getDoubleValue();
+            if (! std::isfinite (cv))
+                return std::nullopt;
+            s.alternatives.push_back ({ *alt, (float) juce::jlimit (0.0, 1.0, cv) });
+        }
+        a.segments.push_back (std::move (s));
+    }
+
+    for (auto& m : a.melody)
+        if (m.startBeat >= totalBeats)
+            return std::nullopt;
+
+    return a;
+}
+
+void SessionEngine::persist()
+{
+    juce::ValueTree t ("Engine");
+    if (analysisResult)
+    {
+        t.setProperty ("source", source, nullptr);
+        t.setProperty ("sourceName", sourceName, nullptr);
+        t.setProperty ("nextId", nextId, nullptr);
+        t.setProperty ("current", currentGenId, nullptr);
+        if (cacheHash.isNotEmpty())
+            t.setProperty ("audioHash", cacheHash, nullptr);
+
+        const auto current = analysisToTree (*analysisResult);
+        t.appendChild (current, nullptr);
+
+        // Generation recipes: the current one plus the most recent others, at most 20 (FR-RH-10).
+        juce::ValueTree gens ("Generations");
+        std::vector<const Generation*> keep;
+        for (auto it = generations.rbegin(); it != generations.rend() && keep.size() < savedGenerations; ++it)
+            if (it->id != currentGenId)
+                keep.push_back (&*it);
+        if (const auto* cur = findGeneration (currentGenId))
+        {
+            if (keep.size() == savedGenerations)
+                keep.pop_back();
+            keep.push_back (cur);
+        }
+        std::sort (keep.begin(), keep.end(), [] (auto* x, auto* y) { return x->id < y->id; });
+
+        for (const auto* g : keep)
+        {
+            juce::ValueTree gt ("Gen");
+            gt.setProperty ("id", g->id, nullptr);
+            gt.setProperty ("seed", juce::String ((juce::uint64) g->seed), nullptr);
+            gt.setProperty ("locks", idList (g->locks), nullptr);
+            gt.appendChild (settingsToTree (g->settings), nullptr);
+            // Only the current set needs its exact input; older recipes replay on today's analysis.
+            if (g->id == currentGenId && g->input != nullptr)
+            {
+                auto in = analysisToTree (*g->input);
+                if (! sameTree (in, current))
+                {
+                    juce::ValueTree wrap ("Input");
+                    wrap.appendChild (in, nullptr);
+                    gt.appendChild (wrap, nullptr);
+                }
+            }
+            gens.appendChild (gt, nullptr);
+        }
+        t.appendChild (gens, nullptr);
+
+        // The current song as a recipe: request, optional AI profile, idea and chosen options.
+        if (song != nullptr)
+        {
+            for (const auto& r : songs)
+            {
+                if (r.id != currentSongId)
+                    continue;
+                juce::ValueTree st ("Song");
+                st.setProperty ("id", r.id, nullptr);
+                st.setProperty ("request", juce::JSON::toString (r.request, true), nullptr);
+                if (r.aiJson.isNotEmpty())
+                    st.setProperty ("ai", r.aiJson, nullptr);
+                st.setProperty ("bpm", num (r.bpm), nullptr);
+                juce::StringArray chosen;
+                for (const auto& sec : song->sections)
+                    chosen.add (juce::String (sec.chosen));
+                st.setProperty ("chosen", chosen.joinIntoString (","), nullptr);
+                if (r.idea == nullptr)
+                    st.setProperty ("noIdea", 1, nullptr);
+                else if (auto idea = analysisToTree (*r.idea); ! sameTree (idea, current))
+                {
+                    juce::ValueTree wrap ("Idea");
+                    wrap.appendChild (idea, nullptr);
+                    st.appendChild (wrap, nullptr);
+                }
+                t.appendChild (st, nullptr);
+            }
+        }
+    }
+
+    const juce::ScopedLock sl (processor.sessionLock);
+    processor.session.removeChild (processor.session.getChildWithName ("Engine"), nullptr);
+    processor.session.appendChild (t, nullptr);
+}
+
+void SessionEngine::restoreState (const juce::ValueTree& t)
+{
+    clearSession();
+
+    auto parsed = analysisFromTree (t.getChildWithName ("Analysis"));
+    if (! parsed)
+    {
+        if (emit)
+            replay();
+        return;
+    }
+
+    analysisResult = std::move (*parsed);
+    const auto currentShared = std::make_shared<const so::analysis::AnalysisResult> (*analysisResult);
+    source = t.getProperty ("source", "captured").toString() == "file" ? "file" : "captured";
+    sourceName = t.getProperty ("sourceName", {}).toString().substring (0, 512);
+    const auto hash = t.getProperty ("audioHash", {}).toString();
+    if (hash.length() == 64 && hash.containsOnly ("0123456789abcdef"))
+        cacheHash = hash;
+
+    const int savedCurrent = readInt (t, "current", 0, std::numeric_limits<int>::max() - 1).value_or (0);
+    int maxId = 0;
+
+    // Generations: recipes in order; the current one is regenerated now (deterministic).
+    const auto gens = t.getChildWithName ("Generations");
+    for (const auto& gt : gens)
+    {
+        if (! gt.hasType ("Gen") || generations.size() >= savedGenerations)
+            continue;
+        const auto id = readInt (gt, "id", 1, std::numeric_limits<int>::max() - 1);
+        if (! id || findGeneration (*id) != nullptr)
+            continue;
+        Generation g;
+        g.id = *id;
+        g.seed = readU64 (gt, "seed");
+        g.locks = idsFrom (gt.getProperty ("locks").toString());
+        g.settings = settingsFromTree (gt.getChildWithName ("Settings"));
+        g.input = currentShared;
+        if (auto in = analysisFromTree (gt.getChildWithName ("Input").getChildWithName ("Analysis")))
+            g.input = std::make_shared<const so::analysis::AnalysisResult> (std::move (*in));
+        maxId = juce::jmax (maxId, g.id);
+        generations.push_back (std::move (g));
+    }
+
+    Generation* cur = findGeneration (savedCurrent);
+    if (cur == nullptr && ! generations.empty())
+        cur = &generations.back();
+    if (cur == nullptr)
+    {
+        Generation g;
+        g.id = ++maxId;
+        g.settings = currentSettings (0);
+        g.input = currentShared;
+        generations.push_back (std::move (g));
+        cur = &generations.back();
+    }
+    cur->list = so::reharm::generate (*cur->input, cur->settings, cur->locks);
+    suggestionList = cur->list;
+    suggestionSeed = cur->seed;
+    currentGenId = cur->id;
+
+    // Song: rebuilt from its request with the same seed, then the saved option picks.
+    const auto st = t.getChildWithName ("Song");
+    if (st.isValid())
+    {
+        SongRecord rec;
+        rec.id = readInt (st, "id", 1, std::numeric_limits<int>::max() - 1).value_or (maxId + 1);
+        rec.request = juce::JSON::parse (st.getProperty ("request").toString());
+        rec.aiJson = st.getProperty ("ai").toString();
+        rec.bpm = juce::jlimit (20.0, 400.0, readNum (st, "bpm").value_or (analysisResult->grid.bpm));
+        if ((int) st.getProperty ("noIdea", 0) != 1)
+        {
+            rec.idea = currentShared;
+            if (auto idea = analysisFromTree (st.getChildWithName ("Idea").getChildWithName ("Analysis")))
+                rec.idea = std::make_shared<const so::analysis::AnalysisResult> (std::move (*idea));
+        }
+
+        if (rec.request.getDynamicObject() != nullptr)
+        {
+            const auto idea = rec.idea ? std::optional<so::analysis::AnalysisResult> (*rec.idea) : std::nullopt;
+            auto built = SongBridge::build (idea, SongBridge::parseRequest (rec.request), rec.aiJson.toStdString(), rec.bpm);
+            if (built.song != nullptr)
+            {
+                const auto chosen = juce::StringArray::fromTokens (st.getProperty ("chosen").toString(), ",", "");
+                for (int i = 0; i < juce::jmin (chosen.size(), (int) built.song->sections.size()); ++i)
+                {
+                    const auto& sec = built.song->sections[(size_t) i];
+                    const int pick = chosen[i].getIntValue();
+                    if (sec.repeatOf < 0 && pick != sec.chosen && chosen[i].containsOnly ("0123456789"))
+                        SongBridge::choose (*built.song, i, pick);
+                }
+                rec.song = std::move (built.song);
+                rec.meta = built.meta;
+                maxId = juce::jmax (maxId, rec.id);
+                song = rec.song;
+                songMeta = rec.meta;
+                currentSongId = rec.id;
+                songs.push_back (std::move (rec));
+            }
+        }
+    }
+
+    nextId = juce::jmax (maxId + 1, readInt (t, "nextId", 1, std::numeric_limits<int>::max() - 1).value_or (1));
+    persist();
+
+    if (emit)
+        replay();
 }

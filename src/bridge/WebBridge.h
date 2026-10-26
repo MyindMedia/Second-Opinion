@@ -12,6 +12,9 @@ class SecondOpinionProcessor;
       getSession()              → { stateVersion, ui:{...} }                         (FR-ST-01)
       setSessionValue(key, val) → true
       exportMidi()              → opens a folder chooser and writes the 4 lanes      (FR-OUT-02)
+      setSettings(settings)     → Ack   analysis quality/source, preview sound, MIDI PPQ/velocity (FR-SET)
+      clearCache()              → { ok, removed }   deletes the captured-audio cache   (FR-ST-01 AC3)
+      restoreSnapshot(snapshot) → Ack   undo/redo: segments, generation, song         (FR-ST-02)
 
     Events (C++ → JS): "transport" { playing, bpm, ppq, numerator, denominator, hasTempo } */
 namespace so::bridge

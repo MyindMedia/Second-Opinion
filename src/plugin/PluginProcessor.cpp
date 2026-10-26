@@ -42,6 +42,7 @@ SecondOpinionProcessor::SecondOpinionProcessor()
 
 SecondOpinionProcessor::~SecondOpinionProcessor()
 {
+    aliveFlag->store (false);
     engine.reset();   // stops engine jobs before the processor goes away
 
     if (drainThread != nullptr)
@@ -533,7 +534,10 @@ void SecondOpinionProcessor::getStateInformation (juce::MemoryBlock& destData)
     juce::ValueTree root ("SecondOpinionState");
     root.setProperty ("stateVersion", stateVersion, nullptr);
     root.appendChild (apvts.copyState(), nullptr);
-    root.appendChild (session.createCopy(), nullptr);
+    {
+        const juce::ScopedLock sl (sessionLock);
+        root.appendChild (session.createCopy(), nullptr);
+    }
 
     if (auto xml = root.createXml())
         copyXmlToBinary (*xml, destData);
@@ -545,8 +549,28 @@ void SecondOpinionProcessor::setStateInformation (const void* data, int sizeInBy
     if (data == nullptr || sizeInBytes <= 0)
         return;
 
+    // copyXmlToBinary layout: magic, UTF-8 byte count (little endian), text. Check it before JUCE
+    // parses, so random bytes are rejected here instead of tripping assertions inside JUCE.
+    if (sizeInBytes < 9 || juce::ByteOrder::littleEndianInt (data) != 0x21324356)
+        return;
+    const auto textBytes = (int) juce::jmin ((juce::uint32) (sizeInBytes - 8),
+                                             juce::ByteOrder::littleEndianInt (static_cast<const char*> (data) + 4));
+    if (textBytes <= 0 || ! juce::CharPointer_UTF8::isValidString (static_cast<const char*> (data) + 8, textBytes))
+        return;
+
     const auto xml = getXmlFromBinary (data, sizeInBytes);
     if (xml == nullptr || ! xml->hasTagName ("SecondOpinionState"))
+        return;
+
+    // ValueTree has no text nodes; such a document is not ours.
+    std::function<bool (const juce::XmlElement&)> plain = [&plain] (const juce::XmlElement& e)
+    {
+        for (auto* c : e.getChildIterator())
+            if (c->isTextElement() || ! plain (*c))
+                return false;
+        return true;
+    };
+    if (! plain (*xml))
         return;
 
     auto root = juce::ValueTree::fromXml (*xml);
@@ -558,24 +582,54 @@ void SecondOpinionProcessor::setStateInformation (const void* data, int sizeInBy
         apvts.replaceState (params);
 
     auto loaded = root.getChildWithName ("Session");
-    if (loaded.isValid())
-    {
-        auto copy = loaded.createCopy();
-        migrateSession (copy);
-        session.copyPropertiesAndChildrenFrom (copy, nullptr);
+    if (! loaded.isValid())
+        return;
 
-        const int sound = session.getProperty ("previewSound", (int) PreviewSound::Keys);
-        previewSoundId.store (juce::jlimit (0, 2, sound));
+    auto copy = loaded.createCopy();
+    migrateSession (copy);
+    {
+        const juce::ScopedLock sl (sessionLock);
+        session.copyPropertiesAndChildrenFrom (copy, nullptr);
     }
+
+    const int sound = session.getProperty ("previewSound", (int) PreviewSound::Keys);
+    previewSoundId.store (juce::jlimit (0, 2, sound));
+
+    // The engine is message-thread only: restore now, or as soon as the message thread is free.
+    if (juce::MessageManager::existsAndIsCurrentThread())
+    {
+        restoreEngineFromSession();
+    }
+    else
+    {
+        auto flag = aliveFlag;
+        juce::MessageManager::callAsync ([this, flag] { if (flag->load()) restoreEngineFromSession(); });
+    }
+}
+
+void SecondOpinionProcessor::restoreEngineFromSession()
+{
+    juce::ValueTree engineTree;
+    {
+        const juce::ScopedLock sl (sessionLock);
+        engineTree = session.getChildWithName ("Engine").createCopy();
+    }
+    engine->loadSettingsFromSession();
+    engine->restoreState (engineTree);
 }
 
 void SecondOpinionProcessor::migrateSession (juce::ValueTree& tree)
 {
-    const int from = tree.getProperty ("stateVersion", 0);
+    int from = 0;
+    if (const auto v = tree.getProperty ("stateVersion", 0).toString(); v.containsOnly ("0123456789") && v.length() < 6)
+        from = v.getIntValue();
 
-    // Version 0 → 1: nothing stored yet, only stamp the version. Future migrations chain here.
-    if (from < 1)
-        tree.setProperty ("stateVersion", 1, nullptr);
+    // 0 -> 1: nothing stored yet, only stamp the version.
+    // 1 -> 2: v1 kept settings (ui_settings), selection and window size as plain properties, which
+    //         v2 reads as is; the engine state ("Engine" child) is new and simply absent.
+    // A newer blob (from > stateVersion) loads what this version understands.
+    if (from < stateVersion)
+        tree.setProperty ("stateVersion", stateVersion, nullptr);
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

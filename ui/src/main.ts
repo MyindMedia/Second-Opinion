@@ -28,6 +28,7 @@ import { WhyPanel } from './components/why';
 import { mockAnalysis } from './state/mock';
 import { arrangementChords, defaultBuildRequest, mockSong } from './state/song';
 import { createStore, defaultBuildForm, defaultSettings, type BuildForm, type Mode, type Settings, type State } from './state/store';
+import { asciiSymbol, snapshotPayload, type Snap } from './state/snapshot';
 import type { ChordSegment, Phase } from './state/types';
 import { generateSet } from './bridge/mock-backend';
 import { el, icon } from './ui/dom';
@@ -89,12 +90,11 @@ const backend: Backend = createHybridBackend(
 // ---------------------------------------------------------------------------------------------
 // Undo / redo (FR-ST-02): snapshots of user edits (corrections, locks, generations, song choices)
 // ---------------------------------------------------------------------------------------------
-type Snap = Pick<State, 'analysis' | 'locked' | 'suggestions' | 'selectedSuggestionId' | 'song'>;
 const undoStack: Snap[] = [];
 const redoStack: Snap[] = [];
 const snap = (): Snap => {
   const s = store.get();
-  return { analysis: s.analysis, locked: new Set(s.locked), suggestions: s.suggestions, selectedSuggestionId: s.selectedSuggestionId, song: s.song };
+  return { analysis: s.analysis, locked: new Set(s.locked), suggestions: s.suggestions, generation: s.generation, selectedSuggestionId: s.selectedSuggestionId, song: s.song };
 };
 function commit(patch: Partial<State>) {
   undoStack.push(snap());
@@ -103,26 +103,14 @@ function commit(patch: Partial<State>) {
   store.set(patch);
 }
 
-/** Keeps the backend's locks and song choices equal to the UI's after undo/redo. */
-function syncBackend(before: Snap, after: Snap) {
-  const off = [...before.locked].filter((id) => !after.locked.has(id));
-  const on = [...after.locked].filter((id) => !before.locked.has(id));
-  if (off.length) void backend.call('lock', off, false);
-  if (on.length) void backend.call('lock', on, true);
-  after.song?.sections.forEach((sec, i) => {
-    if (before.song?.sections[i]?.chosen !== sec.chosen) void backend.call('chooseSectionOption', i, sec.chosen);
-  });
+/** Keeps the backend equal to the UI after undo/redo (FR-ST-02). */
+function syncBackend(after: Snap) {
+  void backend.call('restoreSnapshot', snapshotPayload(after));
 }
 
 // ---------------------------------------------------------------------------------------------
 // Drag strip content (setProgression): the selected suggestion, or the chosen arrangement
 // ---------------------------------------------------------------------------------------------
-/** Chord symbols cross the bridge in ASCII (Ab, F#m7b5): some WebView backends mangle non-ASCII
-    text on the way to C++, and the C++ parser reads both spellings. */
-function asciiSymbol(symbol: string) {
-  return symbol.replace(/♭/g, 'b').replace(/♯/g, '#').replace(/𝄫/g, 'bb').replace(/𝄪/g, '##');
-}
-
 function pushToNative() {
   const s = store.get();
   if (s.mode === 'build') {
@@ -459,15 +447,24 @@ backend.on('suggestionsReady', (p) => {
   if (!isSuggestionsReady(p)) return;
   const s = store.get();
   const fromGenerate = s.generating;
-  const patch: Partial<State> = { suggestions: p.suggestions, generating: false };
+  const patch: Partial<State> = { suggestions: p.suggestions, generation: p.generation, generating: false };
   if (fromGenerate) commit({ ...patch, history: [...s.history, s.suggestions].slice(-20) });
   else store.set(patch);
   if (!p.suggestions.length) store.set({ toast: { kind: 'info', message: 'No suggestions with these colors. Turn on another family.' } });
-  const keep = p.suggestions.find((x) => x.id === s.selectedSuggestionId)?.id;
+  const want = p.selectedId ?? s.selectedSuggestionId;
+  const keep = p.suggestions.find((x) => x.id === want)?.id;
   selectSuggestion(keep ?? p.suggestions[0]?.id);
 });
 
 backend.on('songReady', (song) => {
+  if (song?.restored && isSong(song)) {
+    // Replayed from a saved project (FR-ST-01): show it as it was, without an undo step.
+    mock.prime({ song });
+    const section = Math.min(Math.max(0, restoredSection ?? 0), song.sections.length - 1);
+    store.set({ song, songStatus: 'idle', songProgress: 100, selectedSection: section, focusedOption: undefined, songZoom: 1 });
+    pushToNative();
+    return;
+  }
   if (store.get().songStatus !== 'building') return;   // cancelled meanwhile
   if (!isSong(song)) { store.set({ songStatus: 'error', songError: 'The song builder sent a song this view does not understand.' }); return; }
   mock.prime({ song });
@@ -564,6 +561,7 @@ const grid = SuggestionGrid(store, {
     const f = new Set(store.get().favorites);
     f.has(id) ? f.delete(id) : f.add(id);
     store.set({ favorites: f });
+    void backend.call('setSessionValue', 'ui.favorites', JSON.stringify([...f]));   // FR-RH-10, saved with the project
   },
   audition: (id) => actions.audition(id),
 });
@@ -656,12 +654,21 @@ const popover = ChordPopover(store, {
 function updateSettings(patch: Partial<Settings>) {
   const settings = { ...store.get().settings, ...patch };
   store.set({ settings });
+  // C++ honours quality, source hint, preview sound and MIDI export, and saves the object (FR-SET).
+  void backend.call('setSettings', settings);
   void backend.call('setSessionValue', 'ui.settings', JSON.stringify(settings));
+}
+
+async function clearCapturedAudio() {
+  const r = await backend.call('clearCache');
+  store.set({ toast: r && !r.ok
+    ? { kind: 'error', message: r.error ?? 'The captured audio could not be cleared.' }
+    : { kind: 'info', message: 'Captured audio cleared from this computer.' } });
 }
 
 const settings = SettingsSheet(
   store, updateSettings, () => store.set({ settingsOpen: false }),
-  () => store.set({ toast: { kind: 'info', message: 'Captured audio cleared from this computer.' } }),
+  () => void clearCapturedAudio(),
   { save: (k) => void actions.saveAiKey(k), remove: () => void actions.removeAiKey() },
 );
 const toast = Toast(store, () => actions.retry());
@@ -710,7 +717,7 @@ function undo() {
   const cur = snap();
   redoStack.push(cur);
   store.set(prev);
-  syncBackend(cur, prev);
+  syncBackend(prev);
   pushToNative();
 }
 function redo() {
@@ -719,7 +726,7 @@ function redo() {
   const cur = snap();
   undoStack.push(cur);
   store.set(next);
-  syncBackend(cur, next);
+  syncBackend(next);
   pushToNative();
 }
 
@@ -809,9 +816,21 @@ app.classList.add('mode-reharm');
 // ---------------------------------------------------------------------------------------------
 // Boot: restore the session from the plugin (FR-ST-01), or honour ?state= for previews
 // ---------------------------------------------------------------------------------------------
+/** Section to select when a saved song is replayed (session ui_section). */
+let restoredSection: number | undefined;
+
 async function boot() {
   applyLayout();
   const session = await backend.call('getSession');
+  if (session?.ui_favorites) {
+    try {
+      const ids: unknown = JSON.parse(session.ui_favorites);
+      if (Array.isArray(ids)) store.set({ favorites: new Set(ids.filter((x): x is string => typeof x === 'string')) });
+    } catch { /* ignore a bad blob */ }
+  }
+  if (session?.ui_section) restoredSection = Number(session.ui_section) || 0;
+  if (session?.ui_selected && !store.get().selectedSuggestionId) store.set({ selectedSuggestionId: session.ui_selected });
+  if (session?.ui_mode === 'build' || session?.ui_mode === 'reharm') store.set({ mode: session.ui_mode });
   if (session?.ui_settings) {
     try { store.set({ settings: { ...defaultSettings, ...JSON.parse(session.ui_settings) } }); } catch { /* ignore a bad blob */ }
   }
@@ -822,7 +841,9 @@ async function boot() {
   if (aiStatus) store.set({ aiStatus });
 
   const q = new URLSearchParams(location.search);
-  const want = q.get('state') ?? (session?.ui_selected ? 'ready' : 'empty');
+  // Inside the plugin a saved session comes back through replay (analysisReady, suggestionsReady,
+  // songReady) a moment after load, so the default is the empty stage until it arrives.
+  const want = q.get('state') ?? 'empty';
   const ready = (selected?: string) => {
     const analysis = mockAnalysis();
     mock.prime({ analysis });
@@ -852,7 +873,7 @@ async function boot() {
   };
 
   switch (want) {
-    case 'ready': ready(session?.ui_selected); if (session?.ui_mode === 'build') store.set({ mode: 'build' }); break;
+    case 'ready': ready(session?.ui_selected); break;
     case 'popover': ready(); setTimeout(() => store.set({ popoverSegmentId: 'o12', focusedChord: { lane: 'original', id: 'o12' } }), 60); break;
     case 'analyzing': actions.loadDemo(); break;
     case 'decoding':
@@ -875,7 +896,7 @@ async function boot() {
       withSong();
       store.set({ settingsOpen: true, settingsTab: 'AI' });
       break;
-    default: store.set({ phase: 'empty' });
+    default: if (!store.get().analysis) store.set({ phase: 'empty' });
   }
   if (q.has('drawer')) store.set({ drawerOpen: true });
 

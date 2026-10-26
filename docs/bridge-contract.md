@@ -42,11 +42,14 @@ and bump `schemaVersion` on any breaking change. This supersedes the list in PRD
 | `chooseSectionOption` | `sectionIndex: number, optionIndex: number` | `Ack` | Records the user's pick in the song state (used by `audition` and `exportMidi`). |
 | `setProgression` | `ProgressionPayload` | `SetProgressionResult` | Existing. Content of the native drag strip. In Build out the UI sends the chosen arrangement (one section or the whole song) as back-to-back chords. |
 | `exportMidi` | `scope: 'current' \| 'section' \| 'song'` | `Ack` | Existing, now with a scope. `current` writes what `setProgression` last sent (also the behaviour with no argument). |
-| `getSession` | none | `Record<string, string>` | Existing. Keys the UI reads: `ui_settings`, `ui_build`, `ui_selected`, `ui_mode`, `ui_section`. |
+| `getSession` | none | `Record<string, string>` | Existing. Keys the UI reads: `ui_settings`, `ui_build`, `ui_selected`, `ui_mode`, `ui_section`, `ui_favorites` (JSON array of suggestion ids). |
 | `setSessionValue` | `key: string, value: string` | `boolean` | Existing. Only `ui.*` keys; `.` becomes `_` in the stored name. |
 | `setAiKey` | `key: string` | `AiStatus` | Stores the key in the user's application-data folder (see `AiMoodClient::setKey`). Empty string removes it. Never echo the key back; return `maskedKey`. |
 | `getAiStatus` | none | `AiStatus` | Called at boot. |
 | `parseChord` | `symbol: string` | `ParseChordResult` | Existing. |
+| `setSettings` | `SettingsPayload` (the UI's whole Settings object) | `Ack` | C++ honours `quality` (fast, balanced, accurate) and `sourceHint` (auto, vocal, keys, guitar, loop) for analysis, `previewSound` (keys, pad, off), and MIDI export `ppq` (480 or 960) and `velocity` (flat, humanized). Unknown values fall back to the defaults. The object is saved as `ui_settings` and read back when a project loads. Not an object: `{ ok: false }`. |
+| `clearCache` | none | `{ ok, removed }` | Deletes the captured-audio cache (`<user app data>/SecondOpinion/cache`). Projects keep only the hash, so they still load. |
+| `restoreSnapshot` | `SnapshotPayload` | `Ack` | Undo and redo (FR-ST-02). Puts the native session back to a UI snapshot: `segments` (id, ASCII symbol, confidence, userLocked, userCorrected; unknown ids ignored), `generation` (a `suggestionsReady.generation`), `song` (`null` for none, or `{ generation?, chosen[] }`). No events. `ok: false` when an id is no longer known. |
 
 ## Events
 
@@ -55,8 +58,8 @@ and bump `schemaVersion` on any breaking change. This supersedes the list in PRD
 | `progress` | `{ stage, pct }` | `stage` is `preparing`, `transcribing`, `harmony`, `suggestions` (analysis, in order) or `song` (Build out). `pct` 0 to 100 within the stage. |
 | `captureState` | `{ state, bar, level, needsTempo, maxBars? }` | `state`: `idle`, `armed`, `recording`, `done`. `bar` is 1-based while recording. `level` 0 to 1. `maxBars` defaults to 32. Send at least 10 per second while recording. |
 | `analysisReady` | `AnalysisResult` | Analysis finished. Follow it with `suggestionsReady` for seed 0. |
-| `suggestionsReady` | `{ schemaVersion, seed, suggestions: Suggestion[] }` | After analysis and after every `generate`. |
-| `songReady` | `Song` | `buildSong` finished. |
+| `suggestionsReady` | `{ schemaVersion, seed, suggestions: Suggestion[], generation?, selectedId? }` | After analysis and after every `generate`. `generation` identifies the set for `restoreSnapshot`. `selectedId` appears only on replay of a saved project. |
+| `songReady` | `Song` | `buildSong` finished. On replay of a saved project it carries `restored: true` (show it without an undo step). `generation` identifies the song for `restoreSnapshot`. |
 | `auditionState` | `{ playing, beat, target?, id? }` | About 20 per second while playing, once with `playing: false` when it stops. `beat` is in song beats for `section` and `song`, capture beats for `original` and `suggestion`. |
 | `transport` | `{ playing, bpm, ppq, numerator, denominator, hasTempo }` | Existing. |
 | `error` | `{ code, message }` | See error codes. |
@@ -230,6 +233,12 @@ The UI decodes a dropped file with Web Audio (`decodeAudioData`), downmixes to m
 - **Build out:** `buildSong`, `progress { stage: "song" }`, `songReady`. Picking an option:
   `chooseSectionOption`, then `setProgression` with the arrangement for the drag strip.
 - **Audition:** `audition { play: true }`, `auditionState` ticks, `audition { play: false }`.
+- **Project reopened (FR-ST-01):** the plugin restores its session from the DAW project without
+  re-running analysis. After the page loads, C++ replays `analysisReady`, `suggestionsReady` (with
+  `selectedId`) and `songReady` (with `restored: true`). The UI reads `ui_mode`, `ui_section` and
+  `ui_favorites` from `getSession`. Storage details: `docs/adr/0011-session-persistence.md`.
+- **Undo or redo:** the UI rewinds its own state, then calls `restoreSnapshot` once.
+- **Settings change:** `setSettings` with the whole Settings object (also `setSessionValue ui.settings`).
 
 ## Testing
 
