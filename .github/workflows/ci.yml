@@ -43,7 +43,7 @@ jobs:
             os: macos-14
             preset: mac-universal
           - name: Windows (x64)
-            os: windows-latest
+            os: windows-2022
             preset: win-x64
           - name: Linux (dev check)
             os: ubuntu-24.04

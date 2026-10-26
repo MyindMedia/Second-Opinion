@@ -28,7 +28,7 @@ jobs:
             preset: mac-universal-release
             config: Release
           - name: Windows
-            os: windows-latest
+            os: windows-2022
             preset: win-x64-release
             config: Release
     runs-on: ${{ matrix.os }}

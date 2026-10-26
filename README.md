@@ -54,6 +54,7 @@ auval -v aufx SOp1 Brmt
 ## Build on Windows 10/11 (x64)
 
 You need Visual Studio 2022 (Desktop development with C++), CMake 3.25+, and Node.js 20+ (optional).
+With Visual Studio 2026 instead, add `-G "Visual Studio 18 2026"` to the configure command (CMake 4.2+).
 The WebView2 SDK is linked statically, so install the NuGet package once in PowerShell:
 
 ```powershell
