@@ -32,7 +32,8 @@ add_executable(so_rt_tests
     rt/realtime_safety_test.cpp
     rt/capture_preview_rt_test.cpp
     rt/audio_file_loader_test.cpp
-    rt/bridge_json_test.cpp)
+    rt/bridge_json_test.cpp
+    rt/session_state_test.cpp)
 target_link_libraries(so_rt_tests PRIVATE SecondOpinion Catch2::Catch2)
 target_include_directories(so_rt_tests PRIVATE ${CMAKE_SOURCE_DIR}/src $<TARGET_PROPERTY:SecondOpinion,INCLUDE_DIRECTORIES>)
 target_compile_definitions(so_rt_tests PRIVATE $<TARGET_PROPERTY:SecondOpinion,COMPILE_DEFINITIONS>)
