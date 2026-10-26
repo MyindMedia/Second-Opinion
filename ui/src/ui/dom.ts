@@ -48,6 +48,9 @@ export const icon = {
   info: () => svg('<circle cx="8" cy="8" r="6"/><path d="M8 7.5v3.5M8 5h.01"/>', 14),
   panel: () => svg('<rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M10 3v10"/>'),
   grip: () => `<svg width="8" height="12" viewBox="0 0 8 12" aria-hidden="true">${[0, 1, 2].map((r) => [0, 1].map((c) => `<circle cx="${2 + c * 4}" cy="${2 + r * 4}" r="1" fill="currentColor"/>`).join('')).join('')}</svg>`,
+  folder: () => svg('<path d="M2 4.5a1 1 0 0 1 1-1h3l1.5 1.5H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/>'),
+  check: () => svg('<path d="M3.5 8.5l3 3 6-7"/>', 12),
+  song: () => svg('<rect x="1.5" y="5" width="3" height="6" rx="1"/><rect x="6.5" y="3" width="3" height="10" rx="1"/><rect x="11.5" y="6" width="3" height="4" rx="1"/>'),
   minus: () => svg('<path d="M4 8h8"/>', 12),
   plus: () => svg('<path d="M4 8h8M8 4v8"/>', 12),
 };

@@ -13,7 +13,7 @@ export interface StageActions {
   retry(): void;
   loadDemo(): void;
   setTempo(bpm: number): void;
-  dropFile(name: string): void;
+  openFile(): void;
 }
 
 export function Stage(store: Store, actions: StageActions) {
@@ -26,21 +26,14 @@ export function Stage(store: Store, actions: StageActions) {
     if (act === 'cancel') actions.cancel();
     if (act === 'retry') actions.retry();
     if (act === 'demo') actions.loadDemo();
+    if (act === 'open') actions.openFile();
     if (act === 'tempo') {
       const v = Number(root.querySelector<HTMLInputElement>('input[name=bpm]')?.value);
       if (v >= 40 && v <= 240) actions.setTempo(v);
     }
   });
 
-  // Drop target (FR-IN-02). In the plugin, file paths come through the native drop; here we read the name.
-  root.addEventListener('dragover', (e) => { e.preventDefault(); root.classList.add('is-drop'); });
-  root.addEventListener('dragleave', () => root.classList.remove('is-drop'));
-  root.addEventListener('drop', (e) => {
-    e.preventDefault();
-    root.classList.remove('is-drop');
-    const f = e.dataTransfer?.files?.[0];
-    if (f) actions.dropFile(f.name);
-  });
+  // Drops are handled window-wide in main.ts (decode in JS, then analyzePcm); the drop zone only highlights.
 
   let timer = 0;
 
@@ -59,15 +52,16 @@ export function Stage(store: Store, actions: StageActions) {
             </svg>
             <div class="drop-icon">${icon.drop()}</div>
             <h1>Drop a vocal, loop or bounce</h1>
-            <p>WAV, AIFF, FLAC or MP3, up to 64 bars. Nothing leaves your computer.</p>
+            <p>WAV, AIFF, FLAC or MP3, up to 3 minutes. Nothing leaves your computer.</p>
             <div class="empty-actions">
               <button class="btn btn-primary lg" data-act="capture"><span class="rec-dot">${icon.record(10)}</span>Capture from this track</button>
-              <button class="btn btn-ghost" data-act="demo">Open the example session</button>
+              <button class="btn btn-secondary lg" data-act="open">${icon.folder()}Open audio file</button>
             </div>
+            <button class="link demo-link" data-act="demo">Or open the example session</button>
           </div>
           <ol class="steps">
             <li><b>Capture</b><span>Arm Capture and press play, or drop a file.</span></li>
-            <li><b>Pick a suggestion</b><span>Audition reharmonizations against your audio.</span></li>
+            <li><b>Reharm or build out</b><span>Audition new chords, or grow the idea into a full song.</span></li>
             <li><b>Drag to your DAW</b><span>Chords, bass and top line land as MIDI.</span></li>
           </ol>
         </div>`;
@@ -78,17 +72,17 @@ export function Stage(store: Store, actions: StageActions) {
           <div class="rec-ring${armed ? ' is-armed' : ' is-rec'}">${icon.record(18)}</div>
           <h1>${armed ? 'Press play in your DAW' : 'Listening'}</h1>
           <p>${armed ? 'Capture starts with the transport and stops when you stop playback.' : 'Recording in sync with your session. Audio passes through untouched.'}</p>
-          <div class="bar-counter num" aria-label="Bar ${s.recordingBar} of 32">
-            ${Array.from({ length: 32 }, (_, i) => `<i class="${i < s.recordingBar ? 'on' : ''}"></i>`).join('')}
+          <div class="bar-counter num" aria-label="Bar ${s.recordingBar} of ${s.captureMaxBars}" style="grid-template-columns:repeat(${s.captureMaxBars}, 1fr)">
+            ${Array.from({ length: s.captureMaxBars }, (_, i) => `<i class="${i < s.recordingBar ? 'on' : ''}"></i>`).join('')}
           </div>
-          <div class="capture-meta num"><span>${armed ? 'Waiting for transport' : `Bar ${s.recordingBar} of 32`}</span><span class="meter big" style="--lvl:${armed ? 0 : s.inputLevel}"></span></div>
+          <div class="capture-meta num"><span>${armed ? 'Waiting for transport' : `Bar ${s.recordingBar} of ${s.captureMaxBars}`}</span><span class="meter big" style="--lvl:${armed ? 0 : s.inputLevel}"></span></div>
           <button class="btn btn-secondary" data-act="stop">${icon.stop()}<span>${armed ? 'Disarm' : 'Stop and analyze'}</span></button>
         </div>`;
     } else if (s.phase === 'analyzing') {
       const elapsed = () => ((performance.now() - s.progressStarted) / 1000).toFixed(1);
       root.innerHTML = `
         <div class="analyze-panel" role="progressbar" aria-label="Analyzing" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(s.progress.reduce((a, p) => a + p.pct, 0) / s.progress.length)}">
-          <h1>Reading your audio</h1>
+          <h1>${s.progress[0]?.label === 'Decoding file' && s.progress[0].pct < 100 ? 'Decoding your file' : 'Reading your audio'}</h1>
           <ol class="stages">
             ${s.progress.map((p) => `
               <li class="${p.pct >= 100 ? 'done' : p.pct > 0 ? 'active' : ''}">
@@ -116,15 +110,15 @@ export function Stage(store: Store, actions: StageActions) {
             <button class="btn btn-primary" data-act="tempo">Set tempo and analyze</button></div>
           </div>`
         : `<div class="error-panel">
-            <h1>Couldn't find a steady pitch</h1>
+            <h1>${esc(s.errorTitle ?? "Couldn't find a steady pitch")}</h1>
             <p>${esc(s.errorMessage ?? 'Try soloing the vocal, or capture a cleaner section.')}</p>
-            <div class="tempo-row"><button class="btn btn-primary" data-act="retry">Retry</button><button class="btn btn-ghost" data-act="demo">Open the example session</button></div>
+            <div class="tempo-row"><button class="btn btn-primary" data-act="retry">Retry</button><button class="btn btn-ghost" data-act="open">Open audio file</button><button class="btn btn-ghost" data-act="demo">Open the example session</button></div>
           </div>`;
     }
   }
 
   store.subscribe((_, changed) => {
-    if (changed.has('phase') || changed.has('progress') || changed.has('recordingBar') || changed.has('inputLevel') || changed.has('needsTempo')) render();
+    if (['phase', 'progress', 'recordingBar', 'inputLevel', 'needsTempo', 'captureMaxBars', 'errorMessage', 'errorTitle'].some((k) => changed.has(k as never))) render();
   });
   render();
   return root;
@@ -261,9 +255,14 @@ export function ChordPopover(store: Store, actions: PopoverActions) {
 // ---------------------------------------------------------------------------------------------
 // Settings sheet (FR-SET-01..05)
 // ---------------------------------------------------------------------------------------------
-export function SettingsSheet(store: Store, update: (patch: Partial<Settings>) => void, close: () => void, clearCache: () => void) {
+export interface AiKeyActions {
+  save(key: string): void;
+  remove(): void;
+}
+
+export function SettingsSheet(store: Store, update: (patch: Partial<Settings>) => void, close: () => void, clearCache: () => void, ai: AiKeyActions) {
   const root = el('div', { class: 'sheet-backdrop', hidden: true });
-  const TABS = ['Notation', 'Sound', 'MIDI export', 'Analysis', 'Interface', 'About'];
+  const TABS = ['Notation', 'Sound', 'MIDI export', 'Analysis', 'AI', 'Interface', 'About'];
 
   root.addEventListener('click', (e) => {
     if (e.target === root) return close();
@@ -272,6 +271,9 @@ export function SettingsSheet(store: Store, update: (patch: Partial<Settings>) =
     if (t.dataset.tab) store.set({ settingsTab: t.dataset.tab });
     if (t.dataset.act === 'close') close();
     if (t.dataset.act === 'clear') clearCache();
+    if (t.dataset.act === 'ai-remove') ai.remove();
+    if (t.dataset.act === 'ai-replace') { replacing = true; render(); root.querySelector<HTMLInputElement>('input[name=aikey]')?.focus(); }
+    if (t.dataset.set === 'useOnlineAi=toggle' && !store.get().aiStatus.hasKey) return;
     if (t.dataset.set) {
       const [k, v] = t.dataset.set.split('=');
       const cur = store.get().settings as unknown as Record<string, unknown>;
@@ -285,6 +287,16 @@ export function SettingsSheet(store: Store, update: (patch: Partial<Settings>) =
     if (t.name === 'level') params.previewLevel.set(Number(t.value));
   });
   root.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } });
+  root.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const input = root.querySelector<HTMLInputElement>('input[name=aikey]');
+    if (!input) return;
+    const key = input.value;
+    input.value = '';      // the key never lingers in the DOM; it lives only in the plugin's store
+    replacing = false;
+    if (key.trim()) ai.save(key);
+  });
+  let replacing = false;
 
   const radio = (key: keyof Settings, value: string | number, label: string, s: Settings) =>
     `<button role="radio" aria-checked="${s[key] === value}" data-set="${key}=${value}">${label}</button>`;
@@ -309,13 +321,30 @@ export function SettingsSheet(store: Store, update: (patch: Partial<Settings>) =
         return row('Quality', `<div class="seg-ctl" role="radiogroup">${radio('quality', 'fast', 'Fast', s)}${radio('quality', 'balanced', 'Balanced', s)}${radio('quality', 'accurate', 'Accurate', s)}</div>`, 'Accurate takes longer on long captures')
           + row('Source', `<div class="seg-ctl" role="radiogroup">${radio('sourceHint', 'auto', 'Auto', s)}${radio('sourceHint', 'vocal', 'Vocal', s)}${radio('sourceHint', 'keys', 'Keys', s)}${radio('sourceHint', 'guitar', 'Guitar', s)}${radio('sourceHint', 'loop', 'Loop', s)}</div>`, 'Vocal reads harmony from the melody')
           + row('Cache', `<button class="btn btn-secondary sm" data-act="clear">Clear captured audio</button>`, 'Captured audio is kept on this computer only');
+      case 'AI': {
+        const st = store.get().aiStatus;
+        const keyForm = `<form class="field-row ai-key" autocomplete="off">
+            <input name="aikey" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your API key (sk-...)" aria-label="API key"/>
+            <button class="btn btn-primary sm" type="submit">Save key</button>
+          </form>`;
+        const keyControl = st.hasKey && !replacing
+          ? `<code class="num">${esc(st.maskedKey)}</code><button class="btn btn-ghost sm" data-act="ai-replace">Replace</button><button class="btn btn-ghost sm" data-act="ai-remove">Remove</button>`
+          : keyForm;
+        return row('Online AI', `<button class="switch" role="switch" aria-checked="${st.hasKey && s.useOnlineAi}" data-set="useOnlineAi=toggle" ${st.hasKey ? '' : 'disabled'}><span class="switch-track"><i></i></span><span>Read descriptions with online AI${st.hasKey ? '' : '<small>Add a key below to turn this on</small>'}</span></button>`, 'Works offline when this is off')
+          + row('API key', `${keyControl}${st.lastError ? `<span class="field-msg is-error" role="alert">${esc(st.lastError)}</span>` : ''}`, 'Stored by the plugin in your user folder, never in the project')
+          + `<div class="ai-privacy">
+              <h4>What is sent</h4>
+              <p>Only the words you type in the Build out description, and only when this is on. Your audio, chords and MIDI never leave this computer.</p>
+              <p>If the request fails or there is no network, the description is read offline instead, so Build out always works.</p>
+            </div>`;
+      }
       case 'Interface':
         return row('UI scale', `<input type="range" name="scale" min="75" max="200" step="5" value="${s.scale}"/><span class="num">${s.scale}%</span>`)
           + row('Motion', toggle('reduceMotion', 'Reduce motion', s));
       default:
         return `<div class="about">
             <div class="about-brand"><span class="wordmark">Second Opinion</span><span class="num muted">Version 0.1.0 (Phase 1 preview)</span></div>
-            <p>Works fully offline. Your audio never leaves this computer, and there is no account or telemetry.</p>
+            <p>Works fully offline. Your audio never leaves this computer, and there is no account or telemetry. Online AI for Build out is opt-in and sends description text only.</p>
             <h4>Third-party software</h4>
             <ul class="licenses">
               <li><b>JUCE 9</b><span>JUCE licence (Starter)</span></li>
@@ -348,7 +377,10 @@ export function SettingsSheet(store: Store, update: (patch: Partial<Settings>) =
     root.querySelector<HTMLElement>('[aria-selected=true]')?.focus({ focusVisible: false } as FocusOptions);
   }
 
-  store.subscribe((_, changed) => { if (changed.has('settingsOpen') || changed.has('settingsTab') || changed.has('settings')) render(); });
+  store.subscribe((_, changed) => {
+    if (changed.has('settingsOpen') || changed.has('settingsTab')) replacing = false;
+    if (changed.has('settingsOpen') || changed.has('settingsTab') || changed.has('settings') || changed.has('aiStatus')) render();
+  });
   return root;
 }
 
@@ -365,13 +397,13 @@ export function Banner(store: Store, onReview: () => void) {
   const render = () => {
     const s = store.get();
     const low = s.analysis?.segments.filter((x) => x.confidence < 0.5 && !x.userCorrected).length ?? 0;
-    root.hidden = s.phase !== 'ready' || s.bannerDismissed || low === 0;
+    root.hidden = s.phase !== 'ready' || s.mode === 'build' || s.bannerDismissed || low === 0;
     root.innerHTML = `<span class="banner-mark" aria-hidden="true">?</span>
       <span>${low} chord${low === 1 ? ' is' : 's are'} uncertain. Click ${low === 1 ? 'it' : 'one'} to confirm.</span>
       <button class="link" data-act="review">Review first</button>
       <button class="icon-btn sm" data-act="dismiss" aria-label="Dismiss">${icon.close()}</button>`;
   };
-  store.subscribe((_, c) => { if (c.has('analysis') || c.has('bannerDismissed') || c.has('phase')) render(); });
+  store.subscribe((_, c) => { if (c.has('analysis') || c.has('bannerDismissed') || c.has('phase') || c.has('mode')) render(); });
   render();
   return root;
 }

@@ -4,7 +4,7 @@ import { params } from '../bridge/juce';
 import type { Store } from '../state/store';
 import { el, icon } from '../ui/dom';
 
-export function DragStripPreview(store: Store) {
+export function DragStripPreview(store: Store, onExport: () => void) {
   const root = el('footer', { class: 'dragstrip', 'aria-label': 'Drag MIDI to your DAW' });
   const lanes = ['Chords', 'Bass', 'Top line', 'All'];
   root.innerHTML = `
@@ -24,23 +24,29 @@ export function DragStripPreview(store: Store) {
     h.classList.add('is-dragging');
     e.dataTransfer?.setData('text/plain', `SecondOpinion_Session_${h.dataset.lane}.mid`);
   });
+  root.querySelector('.export')!.addEventListener('click', onExport);
   root.addEventListener('dragend', (e) => (e.target as HTMLElement).closest('.drag-handle')?.classList.remove('is-dragging'));
 
+  // Mirrors whatever was last sent with setProgression (a suggestion, a section or the whole song).
   const render = () => {
     const s = store.get();
-    const sg = s.suggestions.find((x) => x.id === s.selectedSuggestionId);
+    const d = s.dragPreview;
     root.querySelectorAll<HTMLElement>('.drag-handle').forEach((h) => {
-      h.classList.toggle('is-disabled', !sg);
-      h.title = sg ? 'Drag into your DAW' : 'Pick a suggestion first';
+      h.classList.toggle('is-disabled', !d);
+      h.title = d ? `Drag into your DAW: ${d.title}` : s.mode === 'build' ? 'Build a song first' : 'Pick a suggestion first';
       const p = h.querySelector<HTMLElement>('.dh-preview')!;
-      p.innerHTML = sg
-        ? sg.chords.filter((c) => c.startBeat < 32).map((c, i) => `<i style="left:${(c.startBeat / 32) * 100}%;width:${(c.beats / 32) * 100 - 2}%;bottom:${h.dataset.lane === 'Bass' ? 2 + (i % 3) * 2 : 4 + ((i * 5) % 9)}px"></i>`).join('')
+      const span = d ? Math.min(d.totalBeats, s.mode === 'build' ? d.totalBeats : 32) : 1;
+      p.innerHTML = d
+        ? d.chords.filter((c) => c.startBeat - d.startBeat < span).map((c, i) => {
+            const x = c.startBeat - d.startBeat;
+            return `<i style="left:${(x / span) * 100}%;width:${Math.max(1, (c.beats / span) * 100 - 1)}%;bottom:${h.dataset.lane === 'Bass' ? 2 + (i % 3) * 2 : 4 + ((i * 5) % 9)}px"></i>`;
+          }).join('')
         : '';
       h.classList.toggle('lane-bass', h.dataset.lane === 'Bass');
     });
-    (root.querySelector('.export') as HTMLButtonElement).disabled = !sg;
+    (root.querySelector('.export') as HTMLButtonElement).disabled = !d;
   };
-  store.subscribe((_, c) => { if (c.has('selectedSuggestionId') || c.has('suggestions')) render(); });
+  store.subscribe((_, c) => { if (c.has('dragPreview') || c.has('mode')) render(); });
   render();
   return root;
 }
