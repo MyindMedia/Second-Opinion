@@ -99,6 +99,12 @@ resolves the model path from the bundle (AnalysisService, P2-04) is not part of 
 - Windows and Linux: post-build copies. JUCE's own copy-after-build step runs before them, so keep
   `SO_COPY_PLUGIN` OFF there (the presets already do) or the installed copy lacks the runtime.
 
+Verified on Linux (Release build of `SecondOpinion_VST3` and `SecondOpinion_Standalone`):
+`libonnxruntime.so.1` sits next to `Second Opinion.so` and the Standalone binary, both have
+`RUNPATH=$ORIGIN`, and `Contents/Resources/basic_pitch/` plus `licenses/onnxruntime/` are in the
+VST3 bundle. Until plugin code calls the runner (P2-04), the linker drops the unused `so_ml`
+objects, so the binaries do not yet list `libonnxruntime.so.1` as NEEDED.
+
 ## DLL clash mitigation
 
 Other plugins in the same host may load their own, different ONNX Runtime.
