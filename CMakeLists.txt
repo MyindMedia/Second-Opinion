@@ -56,7 +56,15 @@ add_library(so_core STATIC
     src/core/theory/Key.cpp
     src/core/theory/RomanNumeral.cpp
     src/core/midi/MidiWriter.cpp
-    src/core/midi/SimpleVoicer.cpp)
+    src/core/midi/SimpleVoicer.cpp
+    src/core/analysis/FFT.cpp
+    src/core/analysis/Resampler.cpp
+    src/core/analysis/ChromaExtractor.cpp
+    src/core/analysis/BeatAggregator.cpp
+    src/core/analysis/ChordDecoder.cpp
+    src/core/analysis/KeyEstimator.cpp
+    src/core/analysis/MelodyTracker.cpp
+    src/core/analysis/Analyzer.cpp)
 target_include_directories(so_core PUBLIC src)
 so_set_warnings(so_core)
 
