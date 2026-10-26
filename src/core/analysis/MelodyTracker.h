@@ -23,6 +23,7 @@ struct MelodyTrackerOptions
     double minNoteSec { 0.08 };
     float hysteresis { 0.2f };       // semitones beyond +-0.5 before a pitch change is accepted
     int changeFrames { 3 };          // consecutive frames a new pitch must hold
+    float tuningCents { 0.0f };      // global offset from A440 (ChromaExtractor::estimateTuning)
 };
 
 struct PitchFrame

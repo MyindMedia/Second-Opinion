@@ -17,7 +17,12 @@ namespace
     constexpr int kNumHarmonics = 8;
     constexpr float kLogGain = 30.0f;               // log1p(kLogGain * amplitude)
 
-    double midiToHz (double m) { return 440.0 * std::pow (2.0, (m - 69.0) / 12.0); }
+    constexpr double kTuningMinHz = 80.0;
+    constexpr double kTuningMaxHz = 1600.0;
+    constexpr float kTuningPeakFloor = 0.1f;         // -20 dB below the frame's strongest peak
+    constexpr double kTuningMinResultant = 0.15;    // below this the deviations look random
+
+    double midiToHz (double m, double refHz = 440.0) { return refHz * std::pow (2.0, (m - 69.0) / 12.0); }
 }
 
 ChromaSettings ChromaSettings::forQuality (AnalysisQuality q) noexcept
@@ -32,14 +37,16 @@ ChromaSettings ChromaSettings::forQuality (AnalysisQuality q) noexcept
 }
 
 std::array<float, kNumPitches> ChromaExtractor::pitchSalience (const std::vector<float>& mags, int fftSize,
-                                                               double sampleRate, float ampScale)
+                                                               double sampleRate, float ampScale,
+                                                               float tuningCents)
 {
     std::array<float, kNumPitches> p {};
 
+    const double refHz = 440.0 * std::pow (2.0, tuningCents / 1200.0);
     const double binHz = sampleRate / fftSize;
     const int maxBin = (int) mags.size() - 2;
-    const int kLo = std::max (1, (int) std::floor (midiToHz (kLowestPitch - 0.5) / binHz));
-    const int kHi = std::min (maxBin, (int) std::ceil (midiToHz (kHighestPitch + 0.5) / binHz) + 1);
+    const int kLo = std::max (1, (int) std::floor (midiToHz (kLowestPitch - 0.5, refHz) / binHz));
+    const int kHi = std::min (maxBin, (int) std::ceil (midiToHz (kHighestPitch + 0.5, refHz) / binHz) + 1);
     if (kHi <= kLo)
         return p;
 
@@ -64,7 +71,7 @@ std::array<float, kNumPitches> ChromaExtractor::pitchSalience (const std::vector
         const double amp = std::exp (b - 0.25 * (a - c) * off);
 
         const double hz = ((double) k + off) * binHz;
-        const double midi = 69.0 + 12.0 * std::log2 (hz / 440.0);
+        const double midi = 69.0 + 12.0 * std::log2 (hz / refHz);
         const auto note = (int) std::lround (midi);
         if (note < kLowestPitch || note > kHighestPitch)
             continue;
@@ -99,6 +106,76 @@ std::array<float, kNumPitches> ChromaExtractor::pitchSalience (const std::vector
     }
 
     return p;
+}
+
+float ChromaExtractor::estimateTuning (const std::vector<float>& audio, double sampleRate,
+                                      const std::atomic<bool>* cancel)
+{
+    if (audio.empty() || sampleRate <= 0.0)
+        return 0.0f;
+
+    // 8192 points at 22,050 Hz: 2.7 Hz bins, so even 80 Hz peaks are resolved to a few cents
+    // after interpolation. Half-overlapping frames are plenty for one global number.
+    const int order = FFT::orderFor (sampleRate > 30000.0 ? 16384 : 8192);
+    const FFT fft (order);
+    const int n = fft.size();
+    const int hop = n / 2;
+
+    std::vector<float> window ((size_t) n), frame ((size_t) n), mags ((size_t) n / 2 + 1);
+    for (int i = 0; i < n; ++i)
+    {
+        const double x = 2.0 * std::numbers::pi * i / n;
+        window[(size_t) i] = (float) (0.42 - 0.5 * std::cos (x) + 0.08 * std::cos (2.0 * x));
+    }
+    std::vector<FFT::Complex> scratch;
+
+    const double binHz = sampleRate / n;
+    const int kLo = std::max (2, (int) std::floor (kTuningMinHz / binHz));
+    const int kHi = std::min (n / 2 - 2, (int) std::ceil (kTuningMaxHz / binHz));
+
+    double sumC = 0.0, sumS = 0.0, sumW = 0.0;
+    const auto len = audio.size();
+    for (size_t start = 0; start + (size_t) n <= len || start == 0; start += (size_t) hop)
+    {
+        if (cancel != nullptr && cancel->load (std::memory_order_relaxed))
+            return 0.0f;
+        for (int i = 0; i < n; ++i)
+        {
+            const size_t j = start + (size_t) i;
+            frame[(size_t) i] = (j < len ? audio[j] : 0.0f) * window[(size_t) i];
+        }
+        fft.realMagnitudes (frame.data(), mags.data(), scratch);
+
+        float frameMax = 0.0f;
+        for (int k = kLo; k <= kHi; ++k)
+            frameMax = std::max (frameMax, mags[(size_t) k]);
+        if (frameMax <= 1e-9f)
+            continue;
+
+        for (int k = kLo; k <= kHi; ++k)
+        {
+            const float m = mags[(size_t) k];
+            if (m < frameMax * kTuningPeakFloor || m <= mags[(size_t) k - 1] || m < mags[(size_t) k + 1])
+                continue;
+            const double a = std::log (mags[(size_t) k - 1] + 1e-20);
+            const double b = std::log ((double) m + 1e-20);
+            const double c = std::log (mags[(size_t) k + 1] + 1e-20);
+            const double den = a - 2.0 * b + c;
+            const double off = std::abs (den) > 1e-12 ? std::clamp (0.5 * (a - c) / den, -0.5, 0.5) : 0.0;
+            const double midi = 69.0 + 12.0 * std::log2 (((double) k + off) * binHz / 440.0);
+            const double dev = midi - std::round (midi);              // -0.5..0.5 semitone
+            const double w = m / frameMax;
+            sumC += w * std::cos (2.0 * std::numbers::pi * dev);
+            sumS += w * std::sin (2.0 * std::numbers::pi * dev);
+            sumW += w;
+        }
+        if (start + (size_t) n > len)
+            break;
+    }
+
+    if (sumW <= 0.0 || std::hypot (sumC, sumS) / sumW < kTuningMinResultant)
+        return 0.0f;
+    return (float) (100.0 * std::atan2 (sumS, sumC) / (2.0 * std::numbers::pi));
 }
 
 ChromaFrames ChromaExtractor::process (const std::vector<float>& audio, double sampleRate,
@@ -159,7 +236,7 @@ ChromaFrames ChromaExtractor::process (const std::vector<float>& audio, double s
         }
 
         fft.realMagnitudes (frame.data(), mags.data(), scratch);
-        const auto sal = pitchSalience (mags, n, sampleRate, ampScale);
+        const auto sal = pitchSalience (mags, n, sampleRate, ampScale, settings.tuningCents);
 
         Chroma up {}, lo {};
         for (int i = 0; i < kNumPitches; ++i)

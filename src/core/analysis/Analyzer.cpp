@@ -118,6 +118,12 @@ AnalysisResult analyze (const AudioClip& clip, const BeatGrid& grid, const Analy
         return res;
     }
 
+    // Global tuning: recordings off A440 (tape, detuned instruments, varispeed) would otherwise
+    // split every note between two pitch classes. Applied to chroma and the melody tracker.
+    res.tuningCents = ChromaExtractor::estimateTuning (audio, kAnalysisRate, cancel);
+    if (cancelled())
+        return res;
+
     const int soundingBeats = std::min (maxBeats, std::max (1, (int) std::ceil (audioBeats - 0.5)));
     res.bars = (soundingBeats + bpb - 1) / bpb;
     const int numBeats = res.bars * bpb;
@@ -136,7 +142,9 @@ AnalysisResult analyze (const AudioClip& clip, const BeatGrid& grid, const Analy
     }
     else
     {
-        res.notes = MelodyTracker().track (audio, kAnalysisRate, cancel,
+        MelodyTrackerOptions mto;
+        mto.tuningCents = res.tuningCents;
+        res.notes = MelodyTracker (mto).track (audio, kAnalysisRate, cancel,
                                            stageProgress (AnalysisStage::TranscribingNotes, 0.0f, 0.95f));
         if (cancelled())
             return res;
@@ -164,7 +172,9 @@ AnalysisResult analyze (const AudioClip& clip, const BeatGrid& grid, const Analy
         noteWeight = 0.6f;
     }
 
-    const ChromaExtractor extractor (ChromaSettings::forQuality (options.quality));
+    auto chromaSettings = ChromaSettings::forQuality (options.quality);
+    chromaSettings.tuningCents = res.tuningCents;
+    const ChromaExtractor extractor (chromaSettings);
     const auto frames = extractor.process (audio, kAnalysisRate, chromaNotes, noteWeight, cancel,
                                            stageProgress (AnalysisStage::ReadingHarmony, 0.0f, 0.7f));
     if (cancelled())
