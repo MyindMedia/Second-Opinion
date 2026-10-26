@@ -1,4 +1,44 @@
-# Status: session 2 (listening, reharm, song builder)
+# Status: session 3 (GitHub, Mac and Windows builds, persistence, accuracy)
+
+Date: October 26, 2026. Code lives at https://github.com/MyindMedia/Second-Opinion (private).
+
+## CI on GitHub (measured, commit fe4eaca)
+
+| Job | Result |
+|---|---|
+| macOS (universal) | build Debug + Release, ctest, pluginval strictness 5, auval: pass |
+| Windows (x64, VS 2022) | build Debug + Release, ctest 154/154, pluginval strictness 5: pass |
+| Linux (dev check) | build, ctest, pluginval: pass |
+| UI | typecheck + Vitest: pass |
+| Eval (chord accuracy gate) | pass |
+
+## Added in session 3
+
+- **Session save and recall** (FR-ST-01, ADR 0011): analysis, corrections, locks, generation
+  history, favorites and the built song come back with the project, with no re-analysis. Captured
+  audio is cached locally as FLAC by hash, never stored in the project. New native functions
+  `setSettings`, `clearCache`, `restoreSnapshot` (undo and redo across chords, locks, suggestions
+  and song, 64 steps).
+- **Accuracy** (P2-05, ADR 0005): 14-clip labelled eval set, `so_analyze_cli`, `tools/eval`, CI gate.
+  Before and after: majmin 95.6 to 99.4, sevenths 82.1 to 88.2 (99.4 with Basic Pitch), bass 96.3
+  to 99.9, key 13/14 to 14/14. Fixed: A♭/C read as Cm, relative major/minor key choice, global
+  tuning offset, downbeat phase.
+- **Release engineering**: nightly workflow (pluginval 10, sanitizers), release workflow on `v*`
+  tags, macOS .pkg and Windows Inno Setup scaffolding with optional signing (docs/RELEASING.md),
+  opt-in ONNX minimal build path (`SO_ORT_MINIMAL`, not yet built).
+- **Portability fixes found by the first Mac and Windows builds**: a namespace alias clang rejects,
+  missing standard includes for MSVC, npm called through `cmd /c` in the Visual Studio build, ASCII
+  test names, locale-independent number parsing, pluginval exit code on Windows.
+- Git LFS dropped: the model and test WAVs (about 14 MB) are ordinary git files.
+
+## Open decisions for Lawrence
+
+- ONNX Runtime 1.21 for macOS needs macOS 13.3+, while the plugin targets 12.0 (Q9).
+- Plugin codes and manufacturer name before any public build (Q1); see docs/OPEN_QUESTIONS.md.
+
+---
+
+# Session 2 notes (listening, reharm, song builder)
 
 Date: October 26, 2026. Built and tested on a Linux cloud machine (2 cores). macOS and Windows
 builds are configured (presets and CI) but were not compiled in this session; the first Mac build
