@@ -4,6 +4,8 @@
 
 #include <cstdio>
 #include <limits>
+#include <algorithm>
+#include <cstring>
 
 #include "bridge/Json.h"
 #include "core/analysis/Analyzer.h"

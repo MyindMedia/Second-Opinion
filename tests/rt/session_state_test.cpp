@@ -2,6 +2,8 @@
 // through the real processor and SessionEngine. See docs/adr/0011-session-persistence.md.
 
 #include <catch2/catch_test_macros.hpp>
+#include <algorithm>
+#include <cstring>
 
 #include "bridge/Json.h"
 #include "bridge/NativeDragStrip.h"

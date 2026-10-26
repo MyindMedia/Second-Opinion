@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
+#include <algorithm>
 
 using namespace so::preview;
 using so::midi::MidiLane;

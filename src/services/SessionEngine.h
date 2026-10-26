@@ -18,6 +18,7 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <algorithm>
 
 class SecondOpinionProcessor;
 

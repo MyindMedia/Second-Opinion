@@ -1,6 +1,7 @@
 #include "AudioFileLoader.h"
 
 #include <cmath>
+#include <algorithm>
 
 namespace
 {

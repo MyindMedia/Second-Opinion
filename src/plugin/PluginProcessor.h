@@ -20,6 +20,7 @@ class SessionEngine;
 #include <mutex>
 #include <optional>
 #include <utility>
+#include <algorithm>
 
 /** Second Opinion's processor. Zero-latency pass-through plus host capture (P1-06) and the
     preview synth (P3-04). See docs/adr/0008-audio-io.md.

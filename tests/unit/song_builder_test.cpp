@@ -8,6 +8,7 @@
 
 #include <cmath>
 #include <set>
+#include <algorithm>
 
 using namespace so;
 using namespace so::song;

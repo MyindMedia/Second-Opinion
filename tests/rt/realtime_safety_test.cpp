@@ -11,6 +11,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <new>
+#include <cstring>
 
 namespace rt
 {

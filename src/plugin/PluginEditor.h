@@ -4,6 +4,7 @@
 #include "bridge/NativeDragStrip.h"
 
 #include <juce_gui_extra/juce_gui_extra.h>
+#include <algorithm>
 
 /** One WebView (the whole UI, served offline from BinaryData) + the native DragStrip underneath.
     Resizable 1100×700 by default, 860×560 to 1800×1100 (UI brief, Window and layout). */

@@ -7,6 +7,7 @@
 #include "reharm_fixtures.h"
 
 #include <set>
+#include <algorithm>
 
 using namespace so;
 using namespace so::reharm;

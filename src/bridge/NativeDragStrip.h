@@ -3,6 +3,7 @@
 #include "plugin/PluginProcessor.h"
 
 #include <juce_gui_extra/juce_gui_extra.h>
+#include <algorithm>
 
 /** The 48 px bar at the bottom of the editor (UI brief, DragStrip). It is a native JUCE component,
     not part of the WebView, because starting an OS-level file drag from inside a WebView is

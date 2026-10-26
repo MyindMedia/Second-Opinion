@@ -8,6 +8,7 @@
 #include <cmath>
 #include <limits>
 #include <thread>
+#include <algorithm>
 
 namespace
 {

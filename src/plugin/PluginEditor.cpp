@@ -1,4 +1,5 @@
 #include "PluginEditor.h"
+#include <algorithm>
 
 #include "Theme.h"
 #include "bridge/WebBridge.h"
