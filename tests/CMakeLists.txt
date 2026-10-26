@@ -12,6 +12,7 @@ add_executable(so_unit_tests
     unit/analysis_melody_test.cpp
     unit/analysis_pipeline_test.cpp
     unit/analysis_tempo_test.cpp
+    unit/analysis_accuracy_test.cpp
     unit/reharm_candidates_test.cpp
     unit/reharm_voicing_test.cpp
     unit/reharm_generate_test.cpp

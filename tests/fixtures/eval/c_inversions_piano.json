@@ -1,0 +1,49 @@
+{
+  "audio": "c_inversions_piano.wav",
+  "bpm": 96,
+  "downbeat_sec": 0.0,
+  "key": "C major",
+  "chords": [
+    {
+      "beat": 0.0,
+      "len": 4,
+      "symbol": "C"
+    },
+    {
+      "beat": 4.0,
+      "len": 4,
+      "symbol": "G/B"
+    },
+    {
+      "beat": 8.0,
+      "len": 4,
+      "symbol": "Am"
+    },
+    {
+      "beat": 12.0,
+      "len": 4,
+      "symbol": "F"
+    },
+    {
+      "beat": 16.0,
+      "len": 4,
+      "symbol": "C/E"
+    },
+    {
+      "beat": 20.0,
+      "len": 4,
+      "symbol": "F"
+    },
+    {
+      "beat": 24.0,
+      "len": 4,
+      "symbol": "G"
+    },
+    {
+      "beat": 28.0,
+      "len": 4,
+      "symbol": "C"
+    }
+  ],
+  "source": "keys"
+}

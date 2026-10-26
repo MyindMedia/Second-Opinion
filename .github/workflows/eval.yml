@@ -1,0 +1,79 @@
+name: Eval
+
+# Chord and key accuracy gate (PRD 8, ticket P2-05). Builds the headless so_analyze_cli, runs
+# tools/eval/eval_chords.py on the synthesized fixture set in tests/fixtures/eval and fails when
+# majmin, sevenths, bass or key accuracy drops more than 2 points below tools/eval/baseline.json.
+# DSP path only (no ONNX Runtime), so the job is quick and needs no model download.
+
+on:
+  push:
+    paths:
+      - "src/core/**"
+      - "tools/eval/**"
+      - "tools/analyze_cli/**"
+      - "tests/fixtures/eval/**"
+      - "CMakeLists.txt"
+      - ".github/workflows/eval.yml"
+  pull_request:
+    paths:
+      - "src/core/**"
+      - "tools/eval/**"
+      - "tools/analyze_cli/**"
+      - "tests/fixtures/eval/**"
+      - "CMakeLists.txt"
+      - ".github/workflows/eval.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: eval-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-cache
+
+jobs:
+  eval:
+    name: Chord accuracy gate (Linux)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: { lfs: true }
+
+      - uses: actions/cache@v4
+        with:
+          path: .cpm-cache
+          key: cpm-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
+
+      # The top-level project also declares the JUCE plugin, so configure needs its Linux packages.
+      - name: Linux dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ninja-build libwebkit2gtk-4.1-dev libgtk-3-dev libasound2-dev \
+            libcurl4-openssl-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxcomposite-dev
+
+      - name: Check the fixtures are real audio (not LFS pointers)
+        run: |
+          for f in tests/fixtures/eval/*.wav; do
+            head -c 4 "$f" | grep -q RIFF || { echo "::error::$f is not a WAV (git lfs pull?)"; exit 1; }
+          done
+
+      - name: Configure (Release, DSP only)
+        run: cmake -S . -B build/eval -G Ninja -DCMAKE_BUILD_TYPE=Release -DSO_BUILD_TESTS=OFF -DSO_ENABLE_ONNX=OFF
+
+      - name: Build so_analyze_cli
+        run: cmake --build build/eval --target so_analyze_cli
+
+      - name: Evaluate and gate against the baseline
+        run: |
+          python3 tools/eval/eval_chords.py --cli build/eval/so_analyze_cli \
+            --baseline tools/eval/baseline.json --json-out eval-report.json -v | tee eval-report.txt
+          { echo '```'; cat eval-report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-report
+          path: |
+            eval-report.json
+            eval-report.txt
+          if-no-files-found: ignore

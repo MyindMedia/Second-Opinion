@@ -1,0 +1,7 @@
+# Dev-time evaluation tooling, never shipped.
+# eval_chords.py and chordlib.py use only the Python standard library (the mir_eval-style
+# comparison is implemented in chordlib.py), so CI needs nothing from this file.
+# make_fixtures.py needs numpy and scipy; these are the versions that produced the committed WAVs
+# (other versions give the same music but not necessarily the same bytes).
+numpy==2.5.3
+scipy==1.18.1

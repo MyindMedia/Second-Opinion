@@ -68,6 +68,7 @@ struct AnalysisResult
     int bars { 0 };
     theory::Key key;
     float keyConfidence { 0.0f };
+    float tuningCents { 0.0f };     // estimated global offset from A440, -50..50 (analysis only)
     std::vector<ChordSegment> segments;
     std::vector<MelodyNote> melody;
     std::vector<NoteEvent> notes;   // raw transcription, may be empty

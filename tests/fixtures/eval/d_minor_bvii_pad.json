@@ -1,0 +1,49 @@
+{
+  "audio": "d_minor_bvii_pad.wav",
+  "bpm": 76,
+  "downbeat_sec": 0.0,
+  "key": "D minor",
+  "chords": [
+    {
+      "beat": 0.0,
+      "len": 4,
+      "symbol": "Dm"
+    },
+    {
+      "beat": 4.0,
+      "len": 4,
+      "symbol": "C"
+    },
+    {
+      "beat": 8.0,
+      "len": 4,
+      "symbol": "Bb"
+    },
+    {
+      "beat": 12.0,
+      "len": 4,
+      "symbol": "C"
+    },
+    {
+      "beat": 16.0,
+      "len": 4,
+      "symbol": "Dm"
+    },
+    {
+      "beat": 20.0,
+      "len": 4,
+      "symbol": "Bb"
+    },
+    {
+      "beat": 24.0,
+      "len": 4,
+      "symbol": "C"
+    },
+    {
+      "beat": 28.0,
+      "len": 4,
+      "symbol": "Dm"
+    }
+  ],
+  "source": "loop"
+}

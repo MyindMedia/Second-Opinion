@@ -1,0 +1,59 @@
+{
+  "audio": "fm9_loop_epiano.wav",
+  "bpm": 90,
+  "downbeat_sec": 0.0,
+  "key": "F minor",
+  "chords": [
+    {
+      "beat": 0.0,
+      "len": 4,
+      "symbol": "Fm9"
+    },
+    {
+      "beat": 4.0,
+      "len": 4,
+      "symbol": "Dbmaj7"
+    },
+    {
+      "beat": 8.0,
+      "len": 4,
+      "symbol": "Ab/C"
+    },
+    {
+      "beat": 12.0,
+      "len": 2,
+      "symbol": "Ebsus4"
+    },
+    {
+      "beat": 14.0,
+      "len": 2,
+      "symbol": "Eb"
+    },
+    {
+      "beat": 16.0,
+      "len": 4,
+      "symbol": "Fm9"
+    },
+    {
+      "beat": 20.0,
+      "len": 4,
+      "symbol": "Dbmaj7"
+    },
+    {
+      "beat": 24.0,
+      "len": 4,
+      "symbol": "Ab/C"
+    },
+    {
+      "beat": 28.0,
+      "len": 2,
+      "symbol": "Ebsus4"
+    },
+    {
+      "beat": 30.0,
+      "len": 2,
+      "symbol": "Eb"
+    }
+  ],
+  "source": "keys"
+}

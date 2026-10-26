@@ -21,12 +21,17 @@ namespace
     constexpr float kChromaFloor = 0.15f;
     constexpr float kBassFloor = 0.2f;
     constexpr float kMinBassShare = 0.04f;
+    // An inverted chord whose 7th or 9th sits a 12th above the bass (Abmaj7/C: G over C) may be
+    // hearing the bass's 3rd partial instead; that extension is discounted by this much of its
+    // upper-chroma level, so plain Ab/C wins unless the G is clearly louder than a partial.
+    constexpr float kBassPartialExtensionPenalty = 0.5f;
 
     struct QualityTables
     {
         std::array<std::array<float, 12>, kQ> templ {};    // L2-normalised, rooted at C
         std::array<std::array<float, 12>, kQ> bassCost {}; // penalty for each bass interval above the root
         std::array<unsigned, kQ> mask {};
+        std::array<unsigned, kQ> extMask {};               // tones beyond the triad (6, 7, 9)
         std::array<int, kQ> complexity {};
     };
 
@@ -40,6 +45,9 @@ namespace
                 const auto& qi = theory::info ((ChordQuality) i);
                 q.mask[(size_t) i] = theory::qualityMask ((ChordQuality) i);
                 q.complexity[(size_t) i] = qi.complexity;
+                for (const auto& iv : qi.intervals)
+                    if (iv.degree == 6 || iv.degree == 7 || iv.degree == 9)
+                        q.extMask[(size_t) i] |= 1u << (iv.semitones % 12);
 
                 float norm = 0.0f;
                 for (int pc = 0; pc < 12; ++pc)
@@ -140,6 +148,13 @@ namespace
                  + kBassWeight * p.bass[(size_t) s.bassPc]
                  - t.bassCost[q][(size_t) rel]
                  - o.complexityWeight * (float) t.complexity[q];
+
+        if (rel != 0)
+        {
+            const int twelfth = theory::wrapPc (s.bassPc + 7);
+            if (t.extMask[q] & (1u << theory::wrapPc (twelfth - s.root)))
+                sc -= kBassPartialExtensionPenalty * p.upper[(size_t) twelfth] * p.bass[(size_t) s.bassPc];
+        }
 
         if (keyMask != 0)
         {

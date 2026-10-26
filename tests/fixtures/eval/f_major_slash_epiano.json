@@ -1,0 +1,49 @@
+{
+  "audio": "f_major_slash_epiano.wav",
+  "bpm": 92,
+  "downbeat_sec": 0.15,
+  "key": "F major",
+  "chords": [
+    {
+      "beat": 0.0,
+      "len": 4,
+      "symbol": "F"
+    },
+    {
+      "beat": 4.0,
+      "len": 4,
+      "symbol": "C/E"
+    },
+    {
+      "beat": 8.0,
+      "len": 4,
+      "symbol": "Dm"
+    },
+    {
+      "beat": 12.0,
+      "len": 4,
+      "symbol": "Bb/D"
+    },
+    {
+      "beat": 16.0,
+      "len": 4,
+      "symbol": "F/A"
+    },
+    {
+      "beat": 20.0,
+      "len": 4,
+      "symbol": "Bb"
+    },
+    {
+      "beat": 24.0,
+      "len": 4,
+      "symbol": "C7"
+    },
+    {
+      "beat": 28.0,
+      "len": 4,
+      "symbol": "F"
+    }
+  ],
+  "source": "keys"
+}

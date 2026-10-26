@@ -1,0 +1,18 @@
+{
+  "metrics": {
+    "majmin": 99.41,
+    "sevenths": 88.19,
+    "bass": 99.92,
+    "root": 99.92,
+    "key": 100.0,
+    "key_mirex": 100.0
+  },
+  "settings": {
+    "quality": "balanced",
+    "oracle_grid": false,
+    "host_bpm": true,
+    "use_source": false,
+    "basic_pitch": false
+  },
+  "tolerance_points": 2.0
+}

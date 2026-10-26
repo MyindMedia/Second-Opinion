@@ -1,0 +1,49 @@
+{
+  "audio": "a_minor_vocal_pad.wav",
+  "bpm": 84,
+  "downbeat_sec": 0.0,
+  "key": "A minor",
+  "chords": [
+    {
+      "beat": 0.0,
+      "len": 4,
+      "symbol": "Am"
+    },
+    {
+      "beat": 4.0,
+      "len": 4,
+      "symbol": "F"
+    },
+    {
+      "beat": 8.0,
+      "len": 4,
+      "symbol": "C"
+    },
+    {
+      "beat": 12.0,
+      "len": 4,
+      "symbol": "G"
+    },
+    {
+      "beat": 16.0,
+      "len": 4,
+      "symbol": "Am"
+    },
+    {
+      "beat": 20.0,
+      "len": 4,
+      "symbol": "F"
+    },
+    {
+      "beat": 24.0,
+      "len": 4,
+      "symbol": "E7"
+    },
+    {
+      "beat": 28.0,
+      "len": 4,
+      "symbol": "Am"
+    }
+  ],
+  "source": "vocal"
+}

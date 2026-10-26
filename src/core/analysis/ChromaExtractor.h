@@ -25,6 +25,7 @@ struct ChromaSettings
 {
     int windowSize { 8192 };   // power of two
     int hopSize { 1024 };
+    float tuningCents { 0.0f };   // global offset from A440; pitches are mapped relative to it
 
     /** Fast: 4096 / 2048. Balanced: 8192 / 1024. Accurate: 8192 / 512 (all at 22,050 Hz). */
     static ChromaSettings forQuality (AnalysisQuality q) noexcept;
@@ -59,7 +60,15 @@ public:
     /** Pitch salience (MIDI 24..96, linear amplitude) of one magnitude spectrum after peak
         picking and harmonic suppression. Exposed for tests. `mags` holds N/2 + 1 bins. */
     static std::array<float, kNumPitches> pitchSalience (const std::vector<float>& mags, int fftSize,
-                                                         double sampleRate, float ampScale);
+                                                         double sampleRate, float ampScale,
+                                                         float tuningCents = 0.0f);
+
+    /** Global tuning offset from A440 in cents (-50..50), from the amplitude-weighted circular
+        mean of the deviations of strong spectral peaks (80 Hz to 1.6 kHz, where fundamentals
+        and low partials dominate and piano inharmonicity is small) from the equal-tempered grid.
+        Returns 0 when the peaks disagree (no clear tuning) or there is nothing to measure. */
+    static float estimateTuning (const std::vector<float>& audio, double sampleRate,
+                                 const std::atomic<bool>* cancel = nullptr);
 
 private:
     ChromaSettings settings;

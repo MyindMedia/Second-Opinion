@@ -142,7 +142,7 @@ std::vector<PitchFrame> MelodyTracker::pitchTrack (const std::vector<float>& aud
             const double off = std::abs (den) > 1e-12 ? std::clamp (0.5 * (a - c) / den, -1.0, 1.0) : 0.0;
             const double period = best + off;
             const double hz = sr / period;
-            pf.midi = (float) (69.0 + 12.0 * std::log2 (hz / 440.0));
+            pf.midi = (float) (69.0 + 12.0 * std::log2 (hz / 440.0) - options.tuningCents / 100.0);
             pf.confidence = (float) std::clamp (1.0 - b, 0.0, 1.0);
             pf.voiced = true;
         }

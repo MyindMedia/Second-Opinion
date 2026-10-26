@@ -1,0 +1,69 @@
+{
+  "audio": "a_major_sus_piano.wav",
+  "bpm": 72,
+  "downbeat_sec": 0.0,
+  "key": "A major",
+  "chords": [
+    {
+      "beat": 0.0,
+      "len": 2,
+      "symbol": "A"
+    },
+    {
+      "beat": 2.0,
+      "len": 2,
+      "symbol": "Asus4"
+    },
+    {
+      "beat": 4.0,
+      "len": 2,
+      "symbol": "D/F#"
+    },
+    {
+      "beat": 6.0,
+      "len": 2,
+      "symbol": "D"
+    },
+    {
+      "beat": 8.0,
+      "len": 2,
+      "symbol": "E7sus4"
+    },
+    {
+      "beat": 10.0,
+      "len": 2,
+      "symbol": "E7"
+    },
+    {
+      "beat": 12.0,
+      "len": 4,
+      "symbol": "A"
+    },
+    {
+      "beat": 16.0,
+      "len": 2,
+      "symbol": "F#m"
+    },
+    {
+      "beat": 18.0,
+      "len": 2,
+      "symbol": "C#m/E"
+    },
+    {
+      "beat": 20.0,
+      "len": 2,
+      "symbol": "D"
+    },
+    {
+      "beat": 22.0,
+      "len": 2,
+      "symbol": "E"
+    },
+    {
+      "beat": 24.0,
+      "len": 4,
+      "symbol": "A"
+    }
+  ],
+  "source": "keys"
+}
