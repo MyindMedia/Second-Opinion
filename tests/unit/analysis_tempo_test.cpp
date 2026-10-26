@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "analysis_synth.h"
 #include "core/analysis/TempoEstimator.h"
 
 #include <cmath>
@@ -90,4 +91,56 @@ TEST_CASE ("A decaying tail after the last bar is trimmed", "[analysis][tempo]")
     grid.bpm = 92.0;
     trimTrailingTail (clip, grid);
     CHECK (std::abs ((double) clip.samples.size() / clip.sampleRate - 4.0 * bar) < 0.01);
+}
+
+namespace
+{
+    /** Pop groove: chords change on every bar, kick on 1 and 3, a louder noise snare on 2 and 4
+        (which used to pull the bar phase onto beat 2), audio starting right on the downbeat. */
+    AudioClip backbeat (double bpm, double offsetSec, int bars, std::uint32_t seed)
+    {
+        const double beat = 60.0 / bpm;
+        test::Synth s (offsetSec + bars * 4 * beat + 0.5, 44100.0, seed);
+        const int roots[4] { 48, 53, 55, 45 };
+        const int thirds[4] { 4, 4, 4, 3 };
+        for (int b = 0; b < bars; ++b)
+        {
+            const double t0 = offsetSec + b * 4 * beat;
+            const int r = roots[b % 4];
+            for (int k = 0; k < 4; ++k)
+                s.chord (r - 12, { r + 12, r + 12 + thirds[b % 4], r + 19 }, t0 + k * beat, beat * 0.9, 0.08f, 0.05f);
+            for (int k = 0; k < 4; ++k)
+            {
+                const double tk = t0 + k * beat;
+                if (k % 2 == 0)
+                    s.tone (28, tk, 0.2, 0.5f, 1);   // kick-like low thump
+                else
+                    for (size_t i = (size_t) (tk * s.sr); i < (size_t) ((tk + 0.12) * s.sr) && i < s.buf.size(); ++i)
+                        s.buf[i] += (float) ((s.uniform() * 2.0 - 1.0) * 0.5 * std::exp (-((double) i / s.sr - tk) * 30.0));
+            }
+        }
+        s.noise (0.002f);
+        return s.clip();
+    }
+}
+
+TEST_CASE ("Downbeat follows chord changes over a backbeat snare", "[analysis][tempo]")
+{
+    for (double bpm : { 84.0, 96.0, 120.0 })
+    {
+        const auto clip = backbeat (bpm, 0.0, 8, 21);
+        const auto grid = chooseFileGrid (clip, bpm);
+        INFO ("bpm " << bpm << " downbeat " << grid.downbeatSec);
+        CHECK (grid.bpm == bpm);
+        CHECK (grid.downbeatSec <= 0.03);   // bar 1 starts at 0, not a beat (or a half beat) later
+    }
+
+    // With a pickup: the first full bar starts 0.4 s in.
+    const auto pickup = backbeat (100.0, 0.4, 8, 22);
+    CHECK (std::abs (chooseFileGrid (pickup, 100.0).downbeatSec - 0.4) <= 0.03);
+
+    // A double-time host tempo: the phase is recomputed for the tempo actually used.
+    const auto grid = chooseFileGrid (backbeat (90.0, 0.0, 8, 23), 180.0);
+    CHECK (grid.bpm == 180.0);
+    CHECK (grid.downbeatSec <= 0.03);
 }
