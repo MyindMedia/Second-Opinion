@@ -207,8 +207,9 @@ AnalysisResult analyze (const AudioClip& clip, const BeatGrid& grid, const Analy
             return res;
         report (AnalysisStage::ReadingHarmony, 0.85f);
 
-        // Pass 2: refine the key with the decoded chords; re-decode only if it moved.
-        const auto k1 = KeyEstimator::estimate (KeyEstimator::histogram (beats, &res.segments));
+        // Pass 2: refine the key with the decoded chords and their tonal centre (first and last
+        // chord, cadences, bass); re-decode only if it moved.
+        const auto k1 = KeyEstimator::estimateWithChords (beats, res.segments);
         res.key = k1.key;
         res.keyConfidence = k1.confidence;
         if (! (k1.key.tonic.pc() == k0.key.tonic.pc() && k1.key.mode == k0.key.mode))
