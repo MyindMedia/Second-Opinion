@@ -2,6 +2,7 @@
 
 #include "core/midi/MidiWriter.h"
 #include "plugin/Theme.h"
+#include "services/SessionEngine.h"
 
 namespace
 {
@@ -269,9 +270,15 @@ void NativeDragStrip::refresh()
 
 bool NativeDragStrip::writeLane (Lane lane, const juce::File& file) const
 {
+    const auto bytes = laneBytes (processor, lane);
+    return ! bytes.empty() && file.replaceWithData (bytes.data(), bytes.size());
+}
+
+std::vector<std::uint8_t> NativeDragStrip::laneBytes (SecondOpinionProcessor& processor, Lane lane)
+{
     const auto& prog = processor.progression;
     if (prog.chords.empty())
-        return false;
+        return {};
 
     const auto voiced = so::midi::voiceProgression (prog.chords);
     std::vector<so::midi::MidiLane> lanes;
@@ -284,13 +291,39 @@ bool NativeDragStrip::writeLane (Lane lane, const juce::File& file) const
         case Lane::All:    lanes = { voiced.chords, voiced.bass, voiced.top }; break;
     }
 
+    const auto& prefs = processor.getEngine().userSettings();
+
+    // Velocity style. Humanized keeps the voicer's accents and adds -6..+6, seeded by the
+    // progression id (FNV-1a) and the note's lane and index, so exports are reproducible.
+    std::uint64_t seed = 1469598103934665603ull;
+    for (auto c : prog.id.toStdString())
+        seed = (seed ^ (std::uint8_t) c) * 1099511628211ull;
+
+    for (size_t l = 0; l < lanes.size(); ++l)
+    {
+        for (size_t i = 0; i < lanes[l].notes.size(); ++i)
+        {
+            auto& n = lanes[l].notes[i];
+            if (! prefs.humanize)
+            {
+                n.velocity = 100;
+                continue;
+            }
+            auto z = seed + (std::uint64_t) l * 0x9e3779b97f4a7c15ull + (std::uint64_t) (i + 1) * 0xbf58476d1ce4e5b9ull;
+            z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ull;
+            z = (z ^ (z >> 27)) * 0x94d049bb133111ebull;
+            z ^= z >> 31;
+            n.velocity = juce::jlimit (1, 127, n.velocity + (int) (z % 13) - 6);
+        }
+    }
+
     so::midi::MidiFileSpec spec;
     spec.bpm = prog.bpm;
     spec.numerator = processor.getTransport().numerator.load();
     spec.denominator = processor.getTransport().denominator.load();
+    spec.ppq = prefs.ppq;
 
-    const auto bytes = so::midi::writeSmf (lanes, spec);
-    return file.replaceWithData (bytes.data(), bytes.size());
+    return so::midi::writeSmf (lanes, spec);
 }
 
 juce::String NativeDragStrip::fileNameFor (const juce::String& suggestionTitle, Lane lane)

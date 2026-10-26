@@ -120,7 +120,10 @@ juce::WebBrowserComponent::Options addNativeFunctions (juce::WebBrowserComponent
             AiMoodClient::setKey (arg (a, 0).toString());
             c (eng->aiStatus());
         })
-        .withNativeFunction ("getAiStatus", [eng] (const juce::Array<var>&, Completion c) { c (eng->aiStatus()); });
+        .withNativeFunction ("getAiStatus", [eng] (const juce::Array<var>&, Completion c) { c (eng->aiStatus()); })
+        .withNativeFunction ("setSettings", [eng, arg] (const juce::Array<var>& a, Completion c) { c (eng->setSettings (arg (a, 0))); })
+        .withNativeFunction ("clearCache", [eng] (const juce::Array<var>&, Completion c) { c (eng->clearCache()); })
+        .withNativeFunction ("restoreSnapshot", [eng, arg] (const juce::Array<var>& a, Completion c) { c (eng->restoreSnapshot (arg (a, 0))); });
 
     return options
         .withNativeFunction ("parseChord", [] (const juce::Array<var>& args, Completion complete)
@@ -134,6 +137,7 @@ juce::WebBrowserComponent::Options addNativeFunctions (juce::WebBrowserComponent
         .withNativeFunction ("getSession", [proc] (const juce::Array<var>&, Completion complete)
         {
             auto* o = new juce::DynamicObject();
+            const juce::ScopedLock sl (proc->sessionLock);
             for (int i = 0; i < proc->session.getNumProperties(); ++i)
             {
                 const auto name = proc->session.getPropertyName (i);
@@ -146,6 +150,7 @@ juce::WebBrowserComponent::Options addNativeFunctions (juce::WebBrowserComponent
             // Only simple, namespaced UI keys are accepted so the UI can't clobber engine state.
             if (args.size() == 2 && args[0].toString().startsWith ("ui."))
             {
+                const juce::ScopedLock sl (proc->sessionLock);
                 proc->session.setProperty (juce::Identifier (args[0].toString().replaceCharacter ('.', '_')), json::repair (args[1]), nullptr);
                 complete (true);
                 return;

@@ -8,7 +8,7 @@
     not part of the WebView, because starting an OS-level file drag from inside a WebView is
     unreliable across hosts (PRD §7.6, spike P1-05).
 
-    Each handle writes a temp .mid (SMF type 1, 960 PPQ, tempo + time signature) for the current
+    Each handle writes a temp .mid (SMF type 1, 960 or 480 PPQ, tempo + time signature) for the current
     progression and starts performExternalDragDropOfFiles. */
 class NativeDragStrip final : public juce::Component,
                               public juce::DragAndDropContainer
@@ -30,6 +30,12 @@ public:
 
     /** Writes the lane's MIDI to `file`. Returns false when there is nothing to write. */
     bool writeLane (Lane lane, const juce::File& file) const;
+
+    /** SMF bytes for a lane of the processor's current progression, honouring the MIDI export
+        settings (FR-SET-02): PPQ 480 or 960, and flat (all 100) or humanized velocities (the
+        voicer's accents plus a small variation seeded by the progression id, so the same
+        progression always writes the same bytes). Empty when there is nothing to write. */
+    static std::vector<std::uint8_t> laneBytes (SecondOpinionProcessor&, Lane lane);
 
     static juce::String fileNameFor (const juce::String& suggestionTitle, Lane lane);
 
