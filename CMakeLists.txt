@@ -24,6 +24,7 @@ option(SO_WEBVIEW2_STATIC "Windows: link WebView2 statically (needs the Microsof
 
 include(cmake/CPM.cmake)
 include(cmake/Warnings.cmake)
+include(cmake/OnnxRuntime.cmake)   # option SO_ENABLE_ONNX, target so::onnxruntime (ADR 0009)
 
 # ---------------------------------------------------------------------------------------------
 # Dependencies. Pin exact versions so builds are reproducible.
@@ -76,6 +77,26 @@ add_library(so_core STATIC
     src/core/preview/PreviewSynth.cpp)
 target_include_directories(so_core PUBLIC src)
 so_set_warnings(so_core)
+
+# ---------------------------------------------------------------------------------------------
+# so_ml: Basic Pitch transcription on ONNX Runtime (no JUCE). Kept out of so_core so the core and
+# its tests never depend on onnxruntime.
+# ---------------------------------------------------------------------------------------------
+if(SO_ENABLE_ONNX)
+    add_library(so_ml STATIC src/core/analysis/BasicPitchRunner.cpp)
+    target_link_libraries(so_ml PUBLIC so_core so::onnxruntime)
+    so_set_warnings(so_ml)
+    if(WIN32)
+        # The runner loads onnxruntime.dll by full path from the plugin folder; the import is only
+        # a fallback, so it must not be resolved when the plugin DLL loads.
+        target_link_options(so_ml INTERFACE "/DELAYLOAD:onnxruntime.dll")
+        target_link_libraries(so_ml INTERFACE delayimp)
+    endif()
+    set(SO_BASIC_PITCH_FILES
+        ${CMAKE_SOURCE_DIR}/models/basic_pitch/nmp.onnx
+        ${CMAKE_SOURCE_DIR}/models/basic_pitch/LICENSE
+        ${CMAKE_SOURCE_DIR}/models/basic_pitch/NOTICE)
+endif()
 
 # ---------------------------------------------------------------------------------------------
 # WebView UI: ui/ (Vite + TypeScript) → ui/dist → ui.zip → BinaryData
@@ -147,6 +168,12 @@ target_link_libraries(SecondOpinion
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
+
+if(SO_ENABLE_ONNX)
+    target_link_libraries(SecondOpinion PRIVATE so_ml)
+    target_compile_definitions(SecondOpinion PUBLIC SO_HAS_ONNX=1)
+    so_bundle_basic_pitch(SecondOpinion ${SO_BASIC_PITCH_FILES})
+endif()
 
 # ---------------------------------------------------------------------------------------------
 # Tests
