@@ -1,0 +1,54 @@
+{
+  "audio": "d_major_sevenths_epiano.wav",
+  "bpm": 88,
+  "downbeat_sec": 0.0,
+  "key": "D major",
+  "chords": [
+    {
+      "beat": 0.0,
+      "len": 4,
+      "symbol": "Dmaj7"
+    },
+    {
+      "beat": 4.0,
+      "len": 4,
+      "symbol": "Bm7"
+    },
+    {
+      "beat": 8.0,
+      "len": 4,
+      "symbol": "Em7"
+    },
+    {
+      "beat": 12.0,
+      "len": 4,
+      "symbol": "A7"
+    },
+    {
+      "beat": 16.0,
+      "len": 4,
+      "symbol": "Dmaj7"
+    },
+    {
+      "beat": 20.0,
+      "len": 4,
+      "symbol": "Gmaj7"
+    },
+    {
+      "beat": 24.0,
+      "len": 4,
+      "symbol": "Em7"
+    },
+    {
+      "beat": 28.0,
+      "len": 4,
+      "symbol": "A7"
+    },
+    {
+      "beat": 32.0,
+      "len": 4,
+      "symbol": "Dmaj7"
+    }
+  ],
+  "source": "keys"
+}

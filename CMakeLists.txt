@@ -111,6 +111,17 @@ if(SO_ENABLE_ONNX)
         ${CMAKE_SOURCE_DIR}/models/basic_pitch/NOTICE)
 endif()
 
+# Analysis CLI for the chord evaluation (P2-05, tools/eval). No JUCE; Basic Pitch when so_ml exists.
+add_executable(so_analyze_cli tools/analyze_cli/main.cpp)
+target_include_directories(so_analyze_cli PRIVATE tools/analyze_cli)
+if(TARGET so_ml)
+    target_link_libraries(so_analyze_cli PRIVATE so_ml)
+    target_compile_definitions(so_analyze_cli PRIVATE SO_HAS_ONNX=1)
+else()
+    target_link_libraries(so_analyze_cli PRIVATE so_core)
+endif()
+so_set_warnings(so_analyze_cli)
+
 # ---------------------------------------------------------------------------------------------
 # WebView UI: ui/ (Vite + TypeScript) → ui/dist → ui.zip → BinaryData
 # ---------------------------------------------------------------------------------------------

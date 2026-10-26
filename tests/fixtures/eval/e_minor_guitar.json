@@ -1,0 +1,49 @@
+{
+  "audio": "e_minor_guitar.wav",
+  "bpm": 112,
+  "downbeat_sec": 0.4,
+  "key": "E minor",
+  "chords": [
+    {
+      "beat": 0.0,
+      "len": 4,
+      "symbol": "Em"
+    },
+    {
+      "beat": 4.0,
+      "len": 4,
+      "symbol": "Am"
+    },
+    {
+      "beat": 8.0,
+      "len": 4,
+      "symbol": "B7"
+    },
+    {
+      "beat": 12.0,
+      "len": 4,
+      "symbol": "Em"
+    },
+    {
+      "beat": 16.0,
+      "len": 4,
+      "symbol": "C"
+    },
+    {
+      "beat": 20.0,
+      "len": 4,
+      "symbol": "Am"
+    },
+    {
+      "beat": 24.0,
+      "len": 4,
+      "symbol": "B7"
+    },
+    {
+      "beat": 28.0,
+      "len": 4,
+      "symbol": "Em"
+    }
+  ],
+  "source": "guitar"
+}

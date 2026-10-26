@@ -1,0 +1,49 @@
+{
+  "audio": "ab_slash_piano.wav",
+  "bpm": 80,
+  "downbeat_sec": 0.2,
+  "key": "Ab major",
+  "chords": [
+    {
+      "beat": 0.0,
+      "len": 4,
+      "symbol": "Ab/C"
+    },
+    {
+      "beat": 4.0,
+      "len": 4,
+      "symbol": "Db"
+    },
+    {
+      "beat": 8.0,
+      "len": 4,
+      "symbol": "Eb/G"
+    },
+    {
+      "beat": 12.0,
+      "len": 4,
+      "symbol": "Ab"
+    },
+    {
+      "beat": 16.0,
+      "len": 4,
+      "symbol": "Fm"
+    },
+    {
+      "beat": 20.0,
+      "len": 4,
+      "symbol": "Db/F"
+    },
+    {
+      "beat": 24.0,
+      "len": 4,
+      "symbol": "Eb"
+    },
+    {
+      "beat": 28.0,
+      "len": 4,
+      "symbol": "Ab"
+    }
+  ],
+  "source": "keys"
+}
