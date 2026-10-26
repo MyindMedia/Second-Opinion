@@ -10,7 +10,10 @@ add_executable(so_unit_tests
     unit/analysis_dsp_test.cpp
     unit/analysis_chords_test.cpp
     unit/analysis_melody_test.cpp
-    unit/analysis_pipeline_test.cpp)
+    unit/analysis_pipeline_test.cpp
+    unit/reharm_candidates_test.cpp
+    unit/reharm_voicing_test.cpp
+    unit/reharm_generate_test.cpp)
 target_link_libraries(so_unit_tests PRIVATE so_core Catch2::Catch2WithMain)
 so_set_warnings(so_unit_tests)
 catch_discover_tests(so_unit_tests)
