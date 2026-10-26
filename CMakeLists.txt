@@ -146,7 +146,11 @@ target_sources(SecondOpinion PRIVATE
     src/plugin/AudioFileLoader.cpp
     src/plugin/PluginEditor.cpp
     src/bridge/WebBridge.cpp
-    src/bridge/NativeDragStrip.cpp)
+    src/bridge/NativeDragStrip.cpp
+    src/bridge/Json.cpp
+    src/services/SessionEngine.cpp
+    src/services/SongBridge.cpp
+    src/services/AiMoodClient.cpp)
 
 target_include_directories(SecondOpinion PRIVATE src)
 

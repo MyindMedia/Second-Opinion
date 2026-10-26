@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "services/SessionEngine.h"
 
 #include <cmath>
 #include <thread>
@@ -35,10 +36,14 @@ SecondOpinionProcessor::SecondOpinionProcessor()
 
     drainThread = std::make_unique<DrainThread> (*this);
     drainThread->startThread();
+
+    engine = std::make_unique<SessionEngine> (*this);
 }
 
 SecondOpinionProcessor::~SecondOpinionProcessor()
 {
+    engine.reset();   // stops engine jobs before the processor goes away
+
     if (drainThread != nullptr)
         drainThread->stopThread (2000);
 }

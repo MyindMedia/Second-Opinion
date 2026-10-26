@@ -3,6 +3,8 @@
 #include "core/theory/ChordNamer.h"
 #include "core/theory/ChordSymbolParser.h"
 #include "plugin/PluginProcessor.h"
+#include "services/SessionEngine.h"
+#include "bridge/Json.h"
 
 namespace so::bridge
 {
@@ -91,6 +93,33 @@ juce::WebBrowserComponent::Options addNativeFunctions (juce::WebBrowserComponent
                                                         std::function<void()> exportMidi)
 {
     auto* proc = &processor;
+    auto* eng = &processor.getEngine();
+    auto arg = [] (const juce::Array<var>& a, int i) { return i < a.size() ? a[i] : var(); };
+
+    // Every function of docs/bridge-contract.md. Long work acknowledges at once; results arrive as events.
+    options = options
+        .withNativeFunction ("startCapture", [eng] (const juce::Array<var>&, Completion c) { c (eng->startCapture()); })
+        .withNativeFunction ("stopCapture", [eng] (const juce::Array<var>&, Completion c) { c (eng->stopCapture()); })
+        .withNativeFunction ("setTempo", [eng, arg] (const juce::Array<var>& a, Completion c) { c (eng->setTempo ((double) arg (a, 0))); })
+        .withNativeFunction ("openAudioFile", [eng] (const juce::Array<var>&, Completion c) { eng->openAudioFile (std::move (c)); })
+        .withNativeFunction ("analyzePcm", [eng, arg] (const juce::Array<var>& a, Completion c) { c (eng->analyzePcm (arg (a, 0))); })
+        .withNativeFunction ("cancel", [eng] (const juce::Array<var>&, Completion c) { c (eng->cancel()); })
+        .withNativeFunction ("setChord", [eng, arg] (const juce::Array<var>& a, Completion c) { c (eng->setChord (arg (a, 0).toString(), arg (a, 1).toString())); })
+        .withNativeFunction ("lock", [eng, arg] (const juce::Array<var>& a, Completion c) { c (eng->lock (arg (a, 0), (bool) arg (a, 1))); })
+        .withNativeFunction ("generate", [eng, arg] (const juce::Array<var>& a, Completion c)
+        {
+            const auto seed = (juce::int64) arg (a, 0).getProperty ("seed", 0);
+            c (eng->generate ((std::uint64_t) juce::jmax ((juce::int64) 0, seed)));
+        })
+        .withNativeFunction ("audition", [eng, arg] (const juce::Array<var>& a, Completion c) { c (eng->audition (arg (a, 0))); })
+        .withNativeFunction ("buildSong", [eng, arg] (const juce::Array<var>& a, Completion c) { c (eng->buildSong (arg (a, 0))); })
+        .withNativeFunction ("chooseSectionOption", [eng, arg] (const juce::Array<var>& a, Completion c) { c (eng->chooseSectionOption ((int) arg (a, 0), (int) arg (a, 1))); })
+        .withNativeFunction ("setAiKey", [eng, arg] (const juce::Array<var>& a, Completion c)
+        {
+            AiMoodClient::setKey (arg (a, 0).toString());
+            c (eng->aiStatus());
+        })
+        .withNativeFunction ("getAiStatus", [eng] (const juce::Array<var>&, Completion c) { c (eng->aiStatus()); });
 
     return options
         .withNativeFunction ("parseChord", [] (const juce::Array<var>& args, Completion complete)

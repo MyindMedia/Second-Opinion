@@ -11,6 +11,8 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+class SessionEngine;
+
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -148,7 +150,12 @@ public:
     PreviewSound previewSound() const noexcept { return (PreviewSound) previewSoundId.load(); }
     void setAuditionOriginPpq (double ppq) noexcept { auditionOriginPpq.store (ppq); }
 
+    /** Analysis, suggestions and song building for this instance (message thread). */
+    SessionEngine& getEngine() noexcept { return *engine; }
+
 private:
+    std::unique_ptr<SessionEngine> engine;
+
     static void migrateSession (juce::ValueTree& tree);
 
     struct HostPosition

@@ -41,7 +41,15 @@ private:
     std::vector<std::unique_ptr<juce::WebToggleButtonRelay>> colorRelays;
 
     NativeDragStrip dragStrip;
-    std::unique_ptr<juce::WebBrowserComponent> web;
+    /** WebBrowserComponent that tells us when the page has loaded, so cached results can be replayed. */
+    struct Browser final : juce::WebBrowserComponent
+    {
+        using juce::WebBrowserComponent::WebBrowserComponent;
+        std::function<void()> onLoaded;
+        void pageFinishedLoading (const juce::String&) override { if (onLoaded) onLoaded(); }
+    };
+
+    std::unique_ptr<Browser> web;
     juce::Label fallbackMessage;
 
     std::vector<std::unique_ptr<juce::WebSliderParameterAttachment>> sliderAttachments;

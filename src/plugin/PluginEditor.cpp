@@ -2,6 +2,7 @@
 
 #include "Theme.h"
 #include "bridge/WebBridge.h"
+#include "services/SessionEngine.h"
 
 #include "SecondOpinionUIData.h"
 
@@ -41,8 +42,22 @@ SecondOpinionEditor::SecondOpinionEditor (SecondOpinionProcessor& p)
 
     if (juce::WebBrowserComponent::areOptionsSupported (options))
     {
-        web = std::make_unique<juce::WebBrowserComponent> (options);
+        web = std::make_unique<Browser> (options);
         addAndMakeVisible (*web);
+
+        // Engine events go straight to the page; cached results are replayed once it has loaded.
+        auto& engine = processor.getEngine();
+        engine.emit = [this] (const juce::String& name, const juce::var& payload)
+        {
+            if (web != nullptr)
+                web->emitEventIfBrowserIsVisible (name, payload);
+        };
+        juce::Component::SafePointer<SecondOpinionEditor> safe (this);
+        web->onLoaded = [safe]
+        {
+            // Give the page's own boot code a moment to subscribe to events.
+            juce::Timer::callAfterDelay (300, [safe] { if (safe != nullptr) safe->processor.getEngine().replay(); });
+        };
     }
     else
     {
@@ -102,11 +117,12 @@ SecondOpinionEditor::SecondOpinionEditor (SecondOpinionProcessor& p)
     const int h = juce::jlimit (minHeight, maxHeight, (int) processor.session.getProperty ("uiHeight", defaultHeight));
     setSize (w, h);
 
-    startTimerHz (15);
+    startTimerHz (20);   // capture meter, audition playhead and transport
 }
 
 SecondOpinionEditor::~SecondOpinionEditor()
 {
+    processor.getEngine().emit = nullptr;
     processor.onProgressionChanged = nullptr;
 }
 
@@ -193,6 +209,8 @@ void SecondOpinionEditor::timerCallback()
 {
     if (web == nullptr)
         return;
+
+    processor.getEngine().tick();
 
     const auto& t = processor.getTransport();
     LastTransport now { t.playing.load(), t.bpm.load(), t.ppq.load(), t.numerator.load(), t.denominator.load(), t.hasTempo.load() };
