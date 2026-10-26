@@ -56,9 +56,21 @@ add_library(so_core STATIC
     src/core/theory/Key.cpp
     src/core/theory/RomanNumeral.cpp
     src/core/midi/MidiWriter.cpp
-    src/core/midi/SimpleVoicer.cpp)
+    src/core/midi/SimpleVoicer.cpp
+    src/core/song/SongTypes.cpp
+    src/core/song/MiniJson.cpp
+    src/core/song/MoodProfile.cpp
+    src/core/song/MoodInterpreter.cpp
+    src/core/song/SongStructure.cpp
+    src/core/song/SongBuilder.cpp
+    src/core/song/SongMidi.cpp)
 target_include_directories(so_core PUBLIC src)
 so_set_warnings(so_core)
+
+# Console demo of the song builder (no JUCE).
+add_executable(so_song_demo tools/song_demo/main.cpp)
+target_link_libraries(so_song_demo PRIVATE so_core)
+so_set_warnings(so_song_demo)
 
 # ---------------------------------------------------------------------------------------------
 # WebView UI: ui/ (Vite + TypeScript) → ui/dist → ui.zip → BinaryData
