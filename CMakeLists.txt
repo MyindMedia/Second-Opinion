@@ -74,9 +74,21 @@ add_library(so_core STATIC
     src/core/reharm/Ranker.cpp
     src/core/reharm/Reharmonizer.cpp
     src/core/audio/CaptureMath.cpp
-    src/core/preview/PreviewSynth.cpp)
+    src/core/preview/PreviewSynth.cpp
+    src/core/song/SongTypes.cpp
+    src/core/song/MiniJson.cpp
+    src/core/song/MoodProfile.cpp
+    src/core/song/MoodInterpreter.cpp
+    src/core/song/SongStructure.cpp
+    src/core/song/SongBuilder.cpp
+    src/core/song/SongMidi.cpp)
 target_include_directories(so_core PUBLIC src)
 so_set_warnings(so_core)
+
+# Console demo of the song builder (no JUCE).
+add_executable(so_song_demo tools/song_demo/main.cpp)
+target_link_libraries(so_song_demo PRIVATE so_core)
+so_set_warnings(so_song_demo)
 
 # ---------------------------------------------------------------------------------------------
 # so_ml: Basic Pitch transcription on ONNX Runtime (no JUCE). Kept out of so_core so the core and

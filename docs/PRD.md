@@ -194,6 +194,42 @@ IDs: `FR-<area>-<n>`. Areas: IN (input), AN (analysis), RH (reharm), EX (explain
 **FR-UX-02 (MUST)** Keyboard shortcuts: Space (audition), ←/→ (prev/next card), L (lock), R (regenerate), Cmd/Ctrl+Z.
 **FR-UX-03 (SHOULD)** Empty, loading, error and low-confidence states as specified in `UI_DESIGN_BRIEF.md`.
 
+### 5.9 Song builder (FR-SB)
+*The plugin listens to the uploaded sample or song idea and recommends chords and progressions to fill out and build the song from the idea, based on mood and description.* Engine: `src/core/song` (headless, deterministic). Design: `docs/adr/0007-song-builder.md`.
+
+**FR-SB-01 Describe the mood (MUST).** *As a producer, I type how the song should feel ("dark late-night R&B, hopeful chorus, bridge that feels like sunrise") and/or tap mood chips, and the plugin understands it without going online.*
+- AC1: Exactly 16 chips: Dark, Hopeful, Melancholic, Euphoric, Dreamy, Tense, Romantic, Aggressive, Chill, Nostalgic, Cinematic, Soulful, Mysterious, Triumphant, Bittersweet, Gritty. Multi-select.
+- AC2: The offline interpreter turns text plus chips into a MoodProfile: valence (-1..1), energy, tension, darkness, sophistication (0..1), a style tag (Auto, R&B, Neo-Soul, Hip-Hop, Trap, Drill, Pop, Gospel, Lo-Fi, Cinematic, Rock, EDM, Afrobeats, Latin, Jazz, Country), harmonic rhythm, preferred color families and per-section overrides.
+- AC3: It understands synonyms and slang ("vibey", "hard", "smooth", "spacey"), negation ("not too dark" lowers darkness), intensity ("very", "slightly") and section binding (words next to verse, chorus, hook, pre, bridge, intro, outro apply only to that section). Unit-tested on at least 25 phrases.
+- AC4: The UI SHOULD show what was understood ("heard: dark, late night, R&B; chorus: hopeful") so users can correct it.
+- AC5: Same text and chips always give the same profile.
+
+**FR-SB-02 Optional AI interpreter (SHOULD, off by default).** *As a producer who wants a richer reading, I can opt in to an online AI that reads my description.*
+- AC1: Off by default. Turning it on is an explicit opt-in that names the service, because it is the only network call in the product (an exception to FR-UX-01 that Lawrence must approve; open question).
+- AC2: The AI must return the MoodProfile JSON documented in `kMoodProfileJsonSchema`; the request uses `moodSystemPrompt()` and `moodUserPrompt()`. The reply is parsed with `moodFromJson` and goes through the same builder as the offline path.
+- AC3: A malformed or missing reply falls back to the offline interpreter silently, with no error dialog.
+
+**FR-SB-03 Choose a structure and say what the idea is (MUST).** *I pick a song form and tell the plugin which part my idea is.*
+- AC1: Structures: Auto (by style), Pop, R&B, Hip-Hop/Trap, Gospel, EDM, Cinematic, Custom (ordered sections with bar counts).
+- AC2: The idea can be Verse (default), Chorus, Hook or Loop. Loop means the idea repeats as the backbone and the other sections are variations of it.
+- AC3: Section labels follow the form ("Hook" in Hip-Hop/Trap, "Build" and "Drop" in EDM, "Vamp" in Gospel) and repeats are numbered ("Chorus 2").
+
+**FR-SB-04 Build the song (MUST).** *I get a full song map with chord options for every section that grow out of my idea.*
+- AC1: Every section of the idea's type keeps the heard chords exactly (same chords, same timing, tiled to the section length).
+- AC2: Every other section offers 3 options by default (1 to 6 configurable) that are genuinely different (no two with the same chord sequence), each with a title, an explanation of at most 3 sentences (plain language first, theory term in parentheses, including how it leads into the next section), an energy and a tension value.
+- AC3: The last chord of each section leads into the first chord of the next one (dominant, half step, backdoor, plagal, or a common-tone pivot on a dominant or predominant chord). The outro ends on the home chord.
+- AC4: By default the chorus has at least the verse's energy. For dark moods the chorus lifts by intensity (stronger cadence, more drive) rather than brightness.
+- AC5: Mood drives harmony: darkness leads to minor, Phrygian and borrowed chords; valence to major and Lydian lifts; tension to dominants and extensions; sophistication to 7ths and 9ths instead of triads. Genre vocabularies follow the style (for example R&B ii-V-Is and maj9/m9, gospel IV-iv and secondary dominants, trap and drill 2 to 4 chord minor loops with Phrygian bII, pop I-V-vi-IV families, cinematic bVI-bVII-i and Picardy endings).
+- AC6: A bridge MAY offer a key change (+1 or +2 semitones) for the final chorus in styles that use one, never when the heard idea comes after the bridge.
+- AC7: Repeated sections reuse the chosen option and are flagged when their last bar differs (to lead somewhere else) or their key changed. Picking an option for "Chorus 2" applies to every chorus.
+- AC8: Deterministic for the same idea, mood, structure and seed. Shuffle uses a new seed.
+- AC9: With no idea (empty analysis) the builder still produces a full song from the key and mood.
+- AC10: A one-paragraph arc summarizes the song (key, tempo, feel, what each section does, how energy grows).
+
+**FR-SB-05 Take it to the DAW (MUST).** *I drag one section or the whole song out as MIDI.*
+- AC1: Chords, Bass and Top line lanes for one section (starting at beat 0) or the whole song (starting at bar 1), from each section's chosen option, voiced with the same voicer as the reharm cards.
+- AC2: The chosen arrangement flattens to {symbol, beats} for the existing drag strip; every symbol parses back with the chord parser.
+
 ---
 
 ## 6. Non-functional requirements
