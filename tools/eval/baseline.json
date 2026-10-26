@@ -1,11 +1,11 @@
 {
   "metrics": {
-    "majmin": 95.63,
-    "sevenths": 82.07,
-    "bass": 96.31,
-    "root": 96.21,
-    "key": 92.86,
-    "key_mirex": 95.0
+    "majmin": 99.41,
+    "sevenths": 88.19,
+    "bass": 99.92,
+    "root": 99.92,
+    "key": 100.0,
+    "key_mirex": 100.0
   },
   "settings": {
     "quality": "balanced",
