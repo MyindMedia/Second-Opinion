@@ -3,7 +3,9 @@ import { encodePcmBase64 } from '../audio/pcm';
 import { defaultBuildRequest } from '../state/song';
 import type { BackendEventName, BackendEvents } from './contract';
 import { EVENTS, isAnalysisResult, isSong, isSuggestionsReady, NATIVE_FUNCTIONS, SCHEMA_VERSION } from './contract';
-import { createMockBackend } from './mock-backend';
+import { createMockBackend, sanitizeSettings } from './mock-backend';
+import { defaultSettings } from '../state/store';
+import { asciiSymbol, snapshotPayload } from '../state/snapshot';
 
 function record(b: ReturnType<typeof createMockBackend>) {
   const log: { name: BackendEventName; payload: unknown }[] = [];
@@ -19,6 +21,7 @@ describe('bridge contract mock round-trips', () => {
   it('lists every function and event exactly once', () => {
     expect(new Set(NATIVE_FUNCTIONS).size).toBe(NATIVE_FUNCTIONS.length);
     expect(NATIVE_FUNCTIONS).toContain('analyzePcm');
+    for (const f of ['setSettings', 'clearCache', 'restoreSnapshot'] as const) expect(NATIVE_FUNCTIONS).toContain(f);
     expect(EVENTS).toEqual(['progress', 'captureState', 'analysisReady', 'suggestionsReady', 'songReady', 'auditionState', 'transport', 'error']);
   });
 
@@ -131,5 +134,75 @@ describe('bridge contract mock round-trips', () => {
     expect(st.beat).toBeGreaterThanOrEqual(song.sections[1].startBar * 4);
     await b.call('audition', { target: 'section', id: '1', play: false });
     expect(r.last('auditionState')?.playing).toBe(false);
+  });
+
+  it('setSettings: accepts the UI Settings object, sanitizes like C++, rejects non-objects', async () => {
+    const b = createMockBackend({ timeScale: 0.01 });
+    expect(await b.call('setSettings', { ...defaultSettings, quality: 'accurate', ppq: 480, velocity: 'flat', previewSound: 'pad' })).toEqual({ ok: true });
+    expect(b.inspect().settings).toEqual({ quality: 'accurate', sourceHint: 'auto', previewSound: 'pad', ppq: 480, velocity: 'flat' });
+    // Unknown values fall back to the defaults (same rules as SessionEngine::setSettings).
+    expect(sanitizeSettings({ quality: 'turbo' as never, ppq: 123 as never, sourceHint: 'loop' }))
+      .toEqual({ quality: 'balanced', sourceHint: 'loop', previewSound: 'keys', ppq: 960, velocity: 'humanized' });
+    expect((await b.call('setSettings', null as never))?.ok).toBe(false);
+  });
+
+  it('clearCache answers with the number of files removed', async () => {
+    const b = createMockBackend();
+    expect(await b.call('clearCache')).toEqual({ ok: true, removed: 0 });
+  });
+
+  it('suggestionsReady and songReady carry generation ids', async () => {
+    const b = createMockBackend({ timeScale: 0.01 });
+    const r = record(b);
+    await b.call('openAudioFile');
+    await vi.runAllTimersAsync();
+    const g1 = r.last('suggestionsReady')!.generation!;
+    await b.call('generate', { seed: 1 });
+    await vi.runAllTimersAsync();
+    expect(r.last('suggestionsReady')!.generation).toBeGreaterThan(g1);
+    await b.call('buildSong', defaultBuildRequest());
+    await vi.runAllTimersAsync();
+    expect(typeof r.last('songReady')!.generation).toBe('number');
+  });
+
+  it('restoreSnapshot undoes a correction, a lock, a generation and a song pick', async () => {
+    const b = createMockBackend({ timeScale: 0.01 });
+    const r = record(b);
+    await b.call('openAudioFile');
+    await vi.runAllTimersAsync();
+    const analysis = r.last('analysisReady')!;
+    const first = r.last('suggestionsReady')!;
+    await b.call('buildSong', defaultBuildRequest());
+    await vi.runAllTimersAsync();
+    const song = r.last('songReady')!;
+    const before = { analysis, locked: new Set<string>(), suggestions: first.suggestions, generation: first.generation, song };
+
+    // Edits: correct and lock a chord, generate again, pick another option.
+    await b.call('setChord', analysis.segments[0].id, 'C');
+    await b.call('lock', [analysis.segments[1].id], true);
+    await b.call('generate', { seed: 4 });
+    await vi.runAllTimersAsync();
+    await b.call('chooseSectionOption', 1, 2);
+    expect(b.inspect().generation).not.toBe(first.generation);
+
+    // Undo everything with one snapshot.
+    const payload = snapshotPayload(before);
+    expect(payload.segments?.every((s) => /^[\x20-\x7e]*$/.test(s.symbol))).toBe(true);   // ASCII on the bridge
+    expect(await b.call('restoreSnapshot', payload)).toEqual({ ok: true });
+    const now = b.inspect();
+    expect(now.analysis?.segments.map((s) => s.symbol)).toEqual(analysis.segments.map((s) => s.symbol));
+    expect(now.locked).toEqual([]);
+    expect(now.generation).toBe(first.generation);
+    expect(now.song?.sections.map((s) => s.chosen)).toEqual(song.sections.map((s) => s.chosen));
+
+    // No song, and an unknown generation is reported.
+    expect(await b.call('restoreSnapshot', { song: null })).toEqual({ ok: true });
+    expect(b.inspect().song).toBeUndefined();
+    expect((await b.call('restoreSnapshot', { generation: 9999 }))?.ok).toBe(false);
+  });
+
+  it('asciiSymbol spells accidentals in ASCII', () => {
+    expect(asciiSymbol('D♭maj7/F')).toBe('Dbmaj7/F');
+    expect(asciiSymbol('F♯m7♭5')).toBe('F#m7b5');
   });
 });

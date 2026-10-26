@@ -6,8 +6,8 @@ import { mockAnalysis, mockSuggestions } from '../state/mock';
 import { mockSong, songBeats } from '../state/song';
 import { formatChord, isParsed, parseChord } from '../theory/chords';
 import type {
-  AiStatus, AnalysisResult, BackendEventName, BackendEvents, NativeFunctionName, NativeFunctions, ProgressStageId, Song,
-  Suggestion,
+  AiStatus, AnalysisResult, BackendEventName, BackendEvents, NativeFunctionName, NativeFunctions, ProgressStageId,
+  SettingsPayload, Song, Suggestion,
 } from './contract';
 import { PCM_MAX_SECONDS, SCHEMA_VERSION } from './contract';
 import type { Backend } from './backend';
@@ -49,6 +49,23 @@ export const DEFAULT_CONTROLS: MockControls = { tension: 35, colors: [true, true
 export interface MockBackend extends Backend {
   /** Seeds state for ?state= previews without running the timed flows. */
   prime(p: { analysis?: AnalysisResult; song?: Song }): void;
+  /** What the mock currently holds (tests). */
+  inspect(): { analysis?: AnalysisResult; song?: Song; locked: string[]; settings?: SettingsPayload; generation: number };
+}
+
+const QUALITIES = ['fast', 'balanced', 'accurate'];
+const SOURCES = ['auto', 'vocal', 'keys', 'guitar', 'loop'];
+const SOUNDS = ['keys', 'pad', 'off'];
+
+/** Same rules as SessionEngine::setSettings: unknown values fall back to the defaults. */
+export function sanitizeSettings(v: Partial<SettingsPayload>): SettingsPayload {
+  return {
+    quality: QUALITIES.includes(v.quality as string) ? v.quality! : 'balanced',
+    sourceHint: SOURCES.includes(v.sourceHint as string) ? v.sourceHint! : 'auto',
+    previewSound: SOUNDS.includes(v.previewSound as string) ? v.previewSound! : 'keys',
+    ppq: v.ppq === 480 ? 480 : 960,
+    velocity: v.velocity === 'flat' ? 'flat' : 'humanized',
+  };
 }
 
 export function createMockBackend(opts: MockOptions = {}): MockBackend {
@@ -64,6 +81,16 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
   let ai: AiStatus = { hasKey: false, maskedKey: '' };
   let capture = { state: 'idle' as BackendEvents['captureState']['state'], bar: 0 };
   let audition: { timer?: ReturnType<typeof setInterval>; beat: number } = { beat: 0 };
+  let settings: SettingsPayload | undefined;
+  let nextGen = 1;
+  let generation = 0;
+  const sets = new Map<number, Suggestion[]>();   // generation -> suggestions (undo)
+  const songs = new Map<number, Song>();          // song generation -> song (undo)
+  const suggestionsEvent = (seed: number, suggestions: Suggestion[]): BackendEvents['suggestionsReady'] => {
+    generation = nextGen++;
+    sets.set(generation, suggestions);
+    return { schemaVersion: SCHEMA_VERSION, seed, suggestions, generation };
+  };
 
   const emit = <E extends BackendEventName>(name: E, payload: BackendEvents[E]) => {
     // Deep copy: payloads cross the bridge as JSON, so the UI never shares objects with the backend.
@@ -99,7 +126,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       analysis = { ...mockAnalysis(), source, sourceName };
       locked.clear();
       emit('analysisReady', analysis);
-      emit('suggestionsReady', { schemaVersion: SCHEMA_VERSION, seed: 0, suggestions: generateSet(analysis, 0, locked, controls()) });
+      emit('suggestionsReady', suggestionsEvent(0, generateSet(analysis, 0, locked, controls())));
     });
   }
 
@@ -188,7 +215,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     generate({ seed }) {
       analysis ??= mockAnalysis();
       const a = analysis;
-      later(380, () => emit('suggestionsReady', { schemaVersion: SCHEMA_VERSION, seed, suggestions: generateSet(a, seed, locked, controls()) }));
+      later(380, () => emit('suggestionsReady', suggestionsEvent(seed, generateSet(a, seed, locked, controls()))));
       return ok;
     },
     audition({ target, id, play }) {
@@ -224,7 +251,8 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
           emit('error', { code: 'song_failed', message: 'The song builder stopped early. Try again, or remove a few moods.' });
           return;
         }
-        song = { ...mockSong(req, analysis ?? mockAnalysis()), interpreter: online ? 'online' : 'offline' };
+        song = { ...mockSong(req, analysis ?? mockAnalysis()), interpreter: online ? 'online' : 'offline', generation: nextGen++ };
+        songs.set(song.generation!, song);
         emit('songReady', song);
       });
       return ok;
@@ -254,6 +282,43 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       const p = parseChord(symbol);
       return isParsed(p) ? { ok: true, symbol: formatChord(p, 'pop') } : { ok: false, error: p.error };
     },
+    setSettings(v) {
+      if (typeof v !== 'object' || v === null) return { ok: false, error: 'Settings must be an object.' };
+      settings = sanitizeSettings(v);
+      return ok;
+    },
+    clearCache() { return { ok: true, removed: 0 }; },
+    restoreSnapshot(snap) {
+      let good = true;
+      if (snap.segments && analysis) {
+        const byId = new Map(snap.segments.map((s) => [s.id, s]));
+        analysis = {
+          ...analysis,
+          segments: analysis.segments.map((seg) => {
+            const s = byId.get(seg.id);
+            if (!s) return seg;
+            const p = parseChord(s.symbol);
+            if (!isParsed(p)) { good = false; return seg; }
+            return { ...seg, symbol: formatChord(p, 'pop'), confidence: s.confidence, userLocked: s.userLocked, userCorrected: s.userCorrected };
+          }),
+        };
+        for (const s of snap.segments) s.userLocked ? locked.add(s.id) : locked.delete(s.id);
+      }
+      if (snap.generation !== undefined && snap.generation !== generation) {
+        if (sets.has(snap.generation)) generation = snap.generation;
+        else good = false;
+      }
+      if (snap.song === null) song = undefined;
+      else if (snap.song) {
+        const base = snap.song.generation !== undefined ? songs.get(snap.song.generation) : song;
+        if (!base) good = false;
+        else {
+          const chosen = snap.song.chosen;
+          song = { ...base, sections: base.sections.map((sec, i) => (chosen[i] !== undefined && sec.options[chosen[i]] ? { ...sec, chosen: chosen[i] } : sec)) };
+        }
+      }
+      return { ok: good };
+    },
   };
 
   return {
@@ -272,6 +337,9 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     prime(p) {
       if (p.analysis) analysis = p.analysis;
       if (p.song) song = p.song;
+    },
+    inspect() {
+      return { analysis, song, locked: [...locked], settings, generation };
     },
   };
 }
