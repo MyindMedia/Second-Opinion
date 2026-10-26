@@ -14,3 +14,4 @@ Read `docs/PRD.md` (source of truth), `docs/UI_DESIGN_BRIEF.md`, `docs/CLAUDE_BU
 - Design tokens live in `ui/src/styles/tokens.css` and are mirrored in `src/plugin/Theme.h`.
 - JUCE `String` from a `const char*` must be ASCII; use `juce::String::fromUTF8` for anything else.
 - Lawrence prefers documents and messages without em dashes.
+- Test case names must be ASCII (CTest on Windows mangles non-ASCII names and the test is not found).

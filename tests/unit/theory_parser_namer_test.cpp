@@ -105,7 +105,7 @@ TEST_CASE ("Spelling preference respells root and bass", "[theory][namer]")
     CHECK (ChordNamer::name (parse ("Bbm7b5"), ascii) == "Bbm7b5");
 }
 
-TEST_CASE ("G/F is named G/F, never F6sus2♭5", "[theory][namer][slash]")
+TEST_CASE ("G/F is named G/F, never F6sus2b5", "[theory][namer][slash]")
 {
     // The forum complaint (PRD §3): upper G-B-D over F must read as G/F.
     const auto best = ChordNamer::bestReading ({ 7, 11, 2 }, 5);

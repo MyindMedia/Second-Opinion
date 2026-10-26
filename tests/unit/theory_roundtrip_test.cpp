@@ -7,7 +7,7 @@ using namespace so::theory;
 
 /** P1-03 acceptance: parse ↔ name round-trip for the full vocabulary × 12 roots × every bass note,
     in Pop and Jazz style, Unicode and ASCII accidentals, flat and sharp spelling. */
-TEST_CASE ("Round-trip: full vocabulary × 12 roots × every bass", "[theory][roundtrip]")
+TEST_CASE ("Round-trip: full vocabulary x 12 roots x every bass", "[theory][roundtrip]")
 {
     int checked = 0;
 
