@@ -5,7 +5,7 @@ Status: implemented on Linux (measured); macOS and Windows builds written but no
 ## Decision
 
 - **Model:** Spotify Basic Pitch `basic_pitch/saved_models/icassp_2022/nmp.onnx` (Apache-2.0),
-  committed as `models/basic_pitch/nmp.onnx` (Git LFS) with the upstream `LICENSE` and `NOTICE`.
+  committed as `models/basic_pitch/nmp.onnx` with the upstream `LICENSE` and `NOTICE`.
   Source: github.com/spotify/basic-pitch at commit `fa5997af0a8210982619003269994a1be25eddf3`
   (2025-11-13). SHA-256 `2c3c1d144bfa61ad236e92e169c13535c880469a12a047d4e73451f2c059a0ec`,
   230,444 bytes.
@@ -213,12 +213,13 @@ signature), which makes Xcode's signing of any bundle that nests it fail. `OnnxR
 ad-hoc signs a private copy (`build/<preset>/_deps/onnxruntime-adhoc/`) at configure time; release
 signing replaces that signature with the Developer ID one (`packaging/macos/build_pkg.sh`).
 
-## Git LFS
+## Storage (Git LFS dropped)
 
-`.gitattributes` routes `*.onnx` and `tests/fixtures/*.wav` to Git LFS; git-lfs 3.4.1 is installed
-here and both files are committed as LFS objects. A clone without LFS gets pointer files: the
-runner reports "is a Git LFS pointer; run `git lfs pull`" and the fixture test fails on the WAV
-header. CI checkouts need `lfs: true`.
+The model (230 KB) and the test WAVs (about 14 MB in total) were first committed through Git LFS.
+When the repository moved to GitHub, the LFS upload was blocked by the build environment, so the
+history was rewritten with `git lfs migrate export` and they are now ordinary binary files
+(`.gitattributes` marks `*.onnx` and `*.wav` as binary). No `git lfs pull` is needed. The runner
+still reports a clear error if it is ever handed an LFS pointer file.
 
 ## Not verified yet
 

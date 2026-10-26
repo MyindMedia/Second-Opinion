@@ -35,7 +35,6 @@ jobs:
     timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
-        with: { lfs: true }
 
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm, cache-dependency-path: ui/package-lock.json }
@@ -111,7 +110,6 @@ jobs:
       UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
     steps:
       - uses: actions/checkout@v4
-        with: { lfs: true }
 
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm, cache-dependency-path: ui/package-lock.json }

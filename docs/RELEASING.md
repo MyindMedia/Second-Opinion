@@ -12,8 +12,8 @@ treat the first tagged release as a dry run.
 | `.github/workflows/nightly.yml` | daily 07:17 UTC, manual | pluginval strictness 10 and `auval -strict` (macOS, Windows); ASan + UBSan Debug build of `so_unit_tests` (macOS arm64 and Linux clang 18) |
 | `.github/workflows/release.yml` | tag `v*`, manual | Release build on both OSes, `.pkg` and Inno Setup installer, size report, artifacts, draft GitHub release (tags only) |
 
-All build jobs check out with `lfs: true` (the Basic Pitch model and the test WAV are Git LFS
-objects; CI fails early if it gets a pointer file) and cache `.cpm-cache`, which also holds the
+The Basic Pitch model and the test WAVs are ordinary git files (about 14 MB in total; Git LFS was
+dropped because the build environment cannot upload LFS objects). All build jobs cache `.cpm-cache`, which also holds the
 ONNX Runtime archive (`SO_ORT_DOWNLOAD_DIR`).
 
 ## Cutting a release

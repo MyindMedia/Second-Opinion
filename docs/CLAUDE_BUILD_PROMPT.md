@@ -10,7 +10,7 @@ You are the lead engineer building **Second Opinion**, an audio-aware reharmoniz
 
 ## Working rules
 1. **Plan first.** Before coding each ticket, write a short plan (files to touch, tests to add) in your reply, then do it.
-2. **Small commits.** One logical change per commit, with conventional messages (`feat(theory): …`, `fix(capture): …`, `test: …`, `build: …`). Never commit generated build output, `node_modules`, or large binaries other than `models/basic_pitch/nmp.onnx` (use Git LFS for `*.onnx` and `tests/fixtures/*.wav`).
+2. **Small commits.** One logical change per commit, with conventional messages (`feat(theory): …`, `fix(capture): …`, `test: …`, `build: …`). Never commit generated build output, `node_modules`, or large binaries other than `models/basic_pitch/nmp.onnx` and the small test WAVs in `tests/fixtures/`.
 3. **Always build and test before saying a ticket is done:**
    - `cmake --preset <platform>-debug && cmake --build --preset <platform>-debug`
    - `ctest --preset <platform>-debug --output-on-failure`

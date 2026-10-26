@@ -52,13 +52,12 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
-        with: { lfs: true }   # models/basic_pitch/nmp.onnx and tests/fixtures/*.wav are LFS objects
 
-      - name: LFS objects are real files
+      - name: Model file is present
         shell: bash
         run: |
           if head -c 40 models/basic_pitch/nmp.onnx | grep -q "git-lfs"; then
-            echo "::error::nmp.onnx is an LFS pointer (LFS checkout failed or quota exhausted)"; exit 1
+            echo "::error::nmp.onnx is a pointer file, not the model"; exit 1
           fi
 
       - uses: actions/setup-node@v4

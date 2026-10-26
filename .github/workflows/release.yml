@@ -31,7 +31,6 @@ jobs:
       APPLE_CERTIFICATES_PASSWORD: ${{ secrets.APPLE_CERTIFICATES_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
-        with: { lfs: true }
 
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm, cache-dependency-path: ui/package-lock.json }
@@ -100,7 +99,6 @@ jobs:
       WIN_SIGN_TIMESTAMP_URL: ${{ vars.WIN_SIGN_TIMESTAMP_URL }}
     steps:
       - uses: actions/checkout@v4
-        with: { lfs: true }
 
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm, cache-dependency-path: ui/package-lock.json }

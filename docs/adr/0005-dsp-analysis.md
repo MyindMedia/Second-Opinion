@@ -69,8 +69,8 @@ phase is recomputed for the tempo in use.
 
 ## Evaluation (P2-05)
 
-- **Set:** `tests/fixtures/eval/`, 14 clips (16 to 26 s, 288 s of chords, 22,050 Hz mono, Git
-  LFS) synthesised by `tools/eval/make_fixtures.py` from fixed seeds, so they carry no rights
+- **Set:** `tests/fixtures/eval/`, 14 clips (16 to 26 s, 288 s of chords, 22,050 Hz mono, plain
+  binary files) synthesised by `tools/eval/make_fixtures.py` from fixed seeds, so they carry no rights
   issues: inharmonic additive piano, FM electric piano, detuned saw pad, Karplus-Strong guitar,
   formant-filtered sung melody, plain, saw and overdriven bass, light drums, small reverb. Keys
   on 12 tonics, 72 to 128 BPM, pickups up to 0.4 s, inversions and slash chords (Ab/C, Eb/G,
