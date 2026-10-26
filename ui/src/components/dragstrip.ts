@@ -1,0 +1,46 @@
+// Browser-preview stand-in for the native DragStrip (src/bridge/NativeDragStrip.cpp).
+// Inside the plugin this bar is a native JUCE component under the WebView, so it is not rendered here.
+import { params } from '../bridge/juce';
+import type { Store } from '../state/store';
+import { el, icon } from '../ui/dom';
+
+export function DragStripPreview(store: Store) {
+  const root = el('footer', { class: 'dragstrip', 'aria-label': 'Drag MIDI to your DAW' });
+  const lanes = ['Chords', 'Bass', 'Top line', 'All'];
+  root.innerHTML = `
+    ${lanes.map((l) => `<div class="drag-handle" draggable="true" data-lane="${l}" tabindex="0" aria-label="${l} MIDI, drag into your DAW">
+        <span class="grip">${icon.grip()}</span><span class="dh-label" data-label="${l}">${l}</span><span class="dh-preview" aria-hidden="true"></span></div>`).join('')}
+    <button class="btn btn-ghost export">Export MIDI…</button>
+    <label class="preview-level"><span>Preview</span><input type="range" min="-60" max="0" step="0.5" aria-label="Preview level"/></label>`;
+
+  const level = root.querySelector<HTMLInputElement>('input')!;
+  level.addEventListener('input', () => params.previewLevel.set(Number(level.value)));
+  params.previewLevel.subscribe((v) => { level.value = String(v); });
+  level.value = String(params.previewLevel.value);
+
+  root.addEventListener('dragstart', (e) => {
+    const h = (e.target as HTMLElement).closest<HTMLElement>('.drag-handle');
+    if (!h || h.classList.contains('is-disabled')) return e.preventDefault();
+    h.classList.add('is-dragging');
+    e.dataTransfer?.setData('text/plain', `SecondOpinion_Session_${h.dataset.lane}.mid`);
+  });
+  root.addEventListener('dragend', (e) => (e.target as HTMLElement).closest('.drag-handle')?.classList.remove('is-dragging'));
+
+  const render = () => {
+    const s = store.get();
+    const sg = s.suggestions.find((x) => x.id === s.selectedSuggestionId);
+    root.querySelectorAll<HTMLElement>('.drag-handle').forEach((h) => {
+      h.classList.toggle('is-disabled', !sg);
+      h.title = sg ? 'Drag into your DAW' : 'Pick a suggestion first';
+      const p = h.querySelector<HTMLElement>('.dh-preview')!;
+      p.innerHTML = sg
+        ? sg.chords.filter((c) => c.startBeat < 32).map((c, i) => `<i style="left:${(c.startBeat / 32) * 100}%;width:${(c.beats / 32) * 100 - 2}%;bottom:${h.dataset.lane === 'Bass' ? 2 + (i % 3) * 2 : 4 + ((i * 5) % 9)}px"></i>`).join('')
+        : '';
+      h.classList.toggle('lane-bass', h.dataset.lane === 'Bass');
+    });
+    (root.querySelector('.export') as HTMLButtonElement).disabled = !sg;
+  };
+  store.subscribe((_, c) => { if (c.has('selectedSuggestionId') || c.has('suggestions')) render(); });
+  render();
+  return root;
+}

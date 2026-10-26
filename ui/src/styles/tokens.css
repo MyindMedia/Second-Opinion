@@ -1,0 +1,86 @@
+/* Second Opinion design tokens (UI_DESIGN_BRIEF.md §Tokens).
+   Mirrored natively in src/plugin/Theme.h for the DragStrip. Keep both in sync.
+
+   Contrast check (WCAG 2.1 relative luminance, computed by script, not estimated):
+     text      #ECEDEF  bg 16.4  surface-1 15.3  surface-2 14.1  surface-3 12.4
+     text-2    #A6ACB8  bg  8.4  surface-1  7.9  surface-2  7.2  surface-3  6.4
+     text-3    #6E7480  bg  4.1  surface-1  3.8  surface-2  3.5   → fails 4.5:1 for small text.
+               Changed to #7C828E: bg 5.0, surface-1 4.6, surface-2 4.3. On surface-2/3 small text
+               uses text-2 instead. Reported in docs/adr/0003-ui-design-direction.md.
+     accent    #E3A44A  bg 8.8;  accent-ink on accent 8.5;  accent-hover on a changed segment 7.4
+     conf-low  #E07A5F  surface-2 5.6 (glyphs, always paired with hatch + "?")
+     text on a teal (original) segment 11.8
+*/
+
+:root {
+  --so-bg:            #0E0F12;
+  --so-surface-1:     #15171C;
+  --so-surface-2:     #1C1F26;
+  --so-surface-3:     #252934;
+  --so-border:        #2E3340;
+  --so-border-strong: #3D4352;
+  --so-text:          #ECEDEF;
+  --so-text-2:        #A6ACB8;
+  --so-text-3:        #7C828E;   /* adjusted from #6E7480 for contrast, see note above */
+  --so-accent:        #E3A44A;
+  --so-accent-hover:  #F0B65E;
+  --so-accent-ink:    #1A1307;
+  --so-original:      #57C7B8;
+  --so-suggestion:    #E3A44A;
+  --so-conf-high:     #57C7B8;
+  --so-conf-mid:      #D9C25B;
+  --so-conf-low:      #E07A5F;
+  --so-fn-tonic:      #6FA8FF;
+  --so-fn-predominant:#B48CFF;
+  --so-fn-dominant:   #FF8A5C;
+  --so-tension-0:     #5B8CFF;
+  --so-tension-100:   #FF5E3A;
+  --so-danger:        #E5484D;
+  --so-success:       #46A758;
+  --so-focus:         #F0B65E;
+
+  --so-radius-sm: 4px;
+  --so-radius-md: 8px;
+  --so-radius-lg: 12px;
+
+  --so-space-1: 4px;
+  --so-space-2: 8px;
+  --so-space-3: 12px;
+  --so-space-4: 16px;
+  --so-space-6: 24px;
+
+  /* Derived (not in the brief): tints used for fills and wells */
+  --so-original-fill:   rgba(87, 199, 184, 0.14);
+  --so-original-line:   rgba(87, 199, 184, 0.55);
+  --so-accent-fill:     rgba(227, 164, 74, 0.16);
+  --so-accent-line:     rgba(227, 164, 74, 0.6);
+  --so-well-shadow:     inset 0 1px 0 rgba(0, 0, 0, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.015);
+
+  /* Type */
+  --so-font-ui:    'IBM Plex Sans', 'SO Accidentals', system-ui, sans-serif;
+  --so-font-mono:  'IBM Plex Mono', 'SO Accidentals', ui-monospace, monospace;
+  --so-font-chord: 'IBM Plex Sans Condensed', 'SO Accidentals', 'IBM Plex Sans', sans-serif;
+
+  --so-fs-caption: 11px;
+  --so-fs-label:   12px;
+  --so-fs-body:    13px;
+  --so-fs-title:   15px;
+  --so-fs-chord:   20px;
+  --so-fs-roman:   32px;
+
+  --so-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --so-dur: 120ms;
+
+  --so-header-h: 44px;
+  --so-timeline-h: 204px;
+  --so-rail-h: 120px;
+  --so-why-w: 320px;
+}
+
+@font-face {
+  font-family: 'SO Accidentals';
+  src: url('../assets/fonts/so-accidentals.woff2') format('woff2');
+  unicode-range: U+266D-266F, U+1D12A-1D12B;
+  font-display: block;
+  size-adjust: 128%;
+}
