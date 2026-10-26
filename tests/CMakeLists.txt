@@ -20,3 +20,16 @@ target_include_directories(so_rt_tests PRIVATE ${CMAKE_SOURCE_DIR}/src $<TARGET_
 target_compile_definitions(so_rt_tests PRIVATE $<TARGET_PROPERTY:SecondOpinion,COMPILE_DEFINITIONS>)
 target_compile_features(so_rt_tests PRIVATE cxx_std_20)
 catch_discover_tests(so_rt_tests)
+
+# Basic Pitch on ONNX Runtime (P1-08): separate executable so so_unit_tests stays ORT-free.
+if(TARGET so_ml)
+    add_executable(so_ml_tests unit/basic_pitch_test.cpp)
+    target_link_libraries(so_ml_tests PRIVATE so_ml Catch2::Catch2WithMain)
+    target_compile_definitions(so_ml_tests PRIVATE SO_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    so_set_warnings(so_ml_tests)
+    if(WIN32)
+        # Must run before catch_discover_tests' post-build listing.
+        so_bundle_onnxruntime(so_ml_tests "$<TARGET_FILE_DIR:so_ml_tests>")
+    endif()
+    catch_discover_tests(so_ml_tests)
+endif()

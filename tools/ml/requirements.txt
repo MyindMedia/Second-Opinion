@@ -1,0 +1,11 @@
+# Dev-only tooling for tools/ml (not shipped). Install basic-pitch itself with --no-deps; see
+# make_basic_pitch_fixture.py. onnxruntime matches the C++ runtime pinned in cmake/OnnxRuntime.cmake.
+onnxruntime==1.21.0
+onnx==1.23.2
+numpy>=2.0
+scipy>=1.11
+librosa>=0.10
+mir_eval>=0.7
+pretty_midi>=0.2.10
+resampy>=0.2.2,<0.4.3
+scikit-learn>=1.3
