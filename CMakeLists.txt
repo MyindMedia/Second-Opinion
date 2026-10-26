@@ -56,7 +56,9 @@ add_library(so_core STATIC
     src/core/theory/Key.cpp
     src/core/theory/RomanNumeral.cpp
     src/core/midi/MidiWriter.cpp
-    src/core/midi/SimpleVoicer.cpp)
+    src/core/midi/SimpleVoicer.cpp
+    src/core/audio/CaptureMath.cpp
+    src/core/preview/PreviewSynth.cpp)
 target_include_directories(so_core PUBLIC src)
 so_set_warnings(so_core)
 
