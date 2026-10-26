@@ -117,6 +117,12 @@ function syncBackend(before: Snap, after: Snap) {
 // ---------------------------------------------------------------------------------------------
 // Drag strip content (setProgression): the selected suggestion, or the chosen arrangement
 // ---------------------------------------------------------------------------------------------
+/** Chord symbols cross the bridge in ASCII (Ab, F#m7b5): some WebView backends mangle non-ASCII
+    text on the way to C++, and the C++ parser reads both spellings. */
+function asciiSymbol(symbol: string) {
+  return symbol.replace(/♭/g, 'b').replace(/♯/g, '#').replace(/𝄫/g, 'bb').replace(/𝄪/g, '##');
+}
+
 function pushToNative() {
   const s = store.get();
   if (s.mode === 'build') {
@@ -131,7 +137,7 @@ function pushToNative() {
       id: `${song.id}:${scope === 'song' ? 'song' : `section-${s.selectedSection}`}`,
       title,
       bpm: s.hostTempo ?? song.bpm,
-      chords: chords.map((c) => ({ symbol: c.symbol, beats: c.beats })),
+      chords: chords.map((c) => ({ symbol: asciiSymbol(c.symbol), beats: c.beats })),
     });
     return;
   }
@@ -142,7 +148,7 @@ function pushToNative() {
     id: sg.id,
     title: sg.title,
     bpm: s.hostTempo ?? s.analysis.bpm,
-    chords: sg.chords.map((c) => ({ symbol: c.symbol, beats: c.beats })),
+    chords: sg.chords.map((c) => ({ symbol: asciiSymbol(c.symbol), beats: c.beats })),
   });
 }
 
@@ -617,7 +623,7 @@ if (!isNative()) app.append(DragStripPreview(store, actions.exportMidi));
 
 const popover = ChordPopover(store, {
   replace: async (id, symbol) => {
-    const r = await backend.call('setChord', id, symbol);
+    const r = await backend.call('setChord', id, asciiSymbol(symbol));
     if (r && !r.ok) { store.set({ toast: { kind: 'error', message: r.error ?? `${symbol} is not a chord we know yet.` } }); return; }
     const sym = r?.symbol ?? symbol;
     updateSegment(id, (seg) => ({ ...seg, symbol: sym, confidence: 1, userCorrected: true, userLocked: true }));

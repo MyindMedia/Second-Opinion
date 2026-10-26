@@ -37,6 +37,47 @@ juce::var ack (bool ok, const juce::String& error)
     return error.isEmpty() ? object ({ { "ok", ok } }) : object ({ { "ok", ok }, { "error", error } });
 }
 
+juce::String repairUtf8 (const juce::String& s)
+{
+    std::string bytes;
+    bool high = false;
+    for (auto p = s.getCharPointer(); ! p.isEmpty(); ++p)
+    {
+        const auto c = *p;
+        if (c > 0xff)
+            return s;               // real Unicode beyond Latin-1: already decoded correctly
+        high = high || c >= 0x80;
+        bytes.push_back ((char) (unsigned char) c);
+    }
+    if (! high || ! juce::CharPointer_UTF8::isValidString (bytes.c_str(), (int) bytes.size()))
+        return s;
+    return juce::String::fromUTF8 (bytes.c_str(), (int) bytes.size());
+}
+
+juce::var repair (const juce::var& v)
+{
+    if (v.isString())
+        return repairUtf8 (v.toString());
+
+    if (const auto* arr = v.getArray())
+    {
+        juce::Array<juce::var> out;
+        for (const auto& item : *arr)
+            out.add (repair (item));
+        return out;
+    }
+
+    if (auto* obj = v.getDynamicObject())
+    {
+        auto* copy = new juce::DynamicObject();
+        for (const auto& prop : obj->getProperties())
+            copy->setProperty (prop.name, repair (prop.value));
+        return juce::var (copy);
+    }
+
+    return v;
+}
+
 juce::var analysis (const analysis::AnalysisResult& a, const juce::String& source, const juce::String& sourceName)
 {
     juce::Array<juce::var> segments;

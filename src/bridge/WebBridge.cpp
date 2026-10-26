@@ -8,6 +8,7 @@
 
 namespace so::bridge
 {
+namespace json = so::bridge::json;
 
 using juce::var;
 using Completion = juce::WebBrowserComponent::NativeFunctionCompletion;
@@ -94,7 +95,7 @@ juce::WebBrowserComponent::Options addNativeFunctions (juce::WebBrowserComponent
 {
     auto* proc = &processor;
     auto* eng = &processor.getEngine();
-    auto arg = [] (const juce::Array<var>& a, int i) { return i < a.size() ? a[i] : var(); };
+    auto arg = [] (const juce::Array<var>& a, int i) { return i < a.size() ? json::repair (a[i]) : var(); };
 
     // Every function of docs/bridge-contract.md. Long work acknowledges at once; results arrive as events.
     options = options
@@ -124,11 +125,11 @@ juce::WebBrowserComponent::Options addNativeFunctions (juce::WebBrowserComponent
     return options
         .withNativeFunction ("parseChord", [] (const juce::Array<var>& args, Completion complete)
         {
-            complete (parseChord (args.isEmpty() ? juce::String() : args[0].toString()));
+            complete (parseChord (args.isEmpty() ? juce::String() : json::repairUtf8 (args[0].toString())));
         })
         .withNativeFunction ("setProgression", [proc] (const juce::Array<var>& args, Completion complete)
         {
-            complete (args.isEmpty() ? var (false) : setProgression (*proc, args[0]));
+            complete (args.isEmpty() ? var (false) : setProgression (*proc, json::repair (args[0])));
         })
         .withNativeFunction ("getSession", [proc] (const juce::Array<var>&, Completion complete)
         {
@@ -145,7 +146,7 @@ juce::WebBrowserComponent::Options addNativeFunctions (juce::WebBrowserComponent
             // Only simple, namespaced UI keys are accepted so the UI can't clobber engine state.
             if (args.size() == 2 && args[0].toString().startsWith ("ui."))
             {
-                proc->session.setProperty (juce::Identifier (args[0].toString().replaceCharacter ('.', '_')), args[1], nullptr);
+                proc->session.setProperty (juce::Identifier (args[0].toString().replaceCharacter ('.', '_')), json::repair (args[1]), nullptr);
                 complete (true);
                 return;
             }

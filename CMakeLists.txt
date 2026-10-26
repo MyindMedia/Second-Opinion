@@ -66,6 +66,7 @@ add_library(so_core STATIC
     src/core/analysis/KeyEstimator.cpp
     src/core/analysis/MelodyTracker.cpp
     src/core/analysis/Analyzer.cpp
+    src/core/analysis/TempoEstimator.cpp
     src/core/reharm/Harmony.cpp
     src/core/reharm/CandidateGenerator.cpp
     src/core/reharm/VoiceLeadingSolver.cpp

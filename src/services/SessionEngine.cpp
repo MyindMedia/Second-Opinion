@@ -2,6 +2,7 @@
 
 #include "bridge/Json.h"
 #include "core/analysis/Analyzer.h"
+#include "core/analysis/TempoEstimator.h"
 #include "core/reharm/Reharmonizer.h"
 #include "core/theory/ChordNamer.h"
 #include "core/theory/ChordSymbolParser.h"
@@ -56,6 +57,12 @@ void SessionEngine::emitProgress (const juce::String& stage, float pct01)
 {
     if (emit)
         emit ("progress", json::object ({ { "stage", stage }, { "pct", juce::jlimit (0.0f, 100.0f, pct01 * 100.0f) } }));
+}
+
+std::optional<double> SessionEngine::hostTempo() const
+{
+    const auto& t = processor.getTransport();
+    return t.hasTempo.load() ? std::optional<double> (t.bpm.load()) : std::nullopt;
 }
 
 double SessionEngine::sessionBpm() const
@@ -237,8 +244,8 @@ var SessionEngine::analyzePcm (const var& request)
                 emitError ("decode_failed", "That audio is too short or couldn't be read. Use at least one second.");
                 return;
             }
-            so::analysis::BeatGrid grid;
-            grid.bpm = bpm;
+            const auto grid = so::analysis::chooseFileGrid (result.clip, hostTempo());
+            so::analysis::trimTrailingTail (result.clip, grid);
             analyze (std::move (result.clip), grid, "file", name);
         });
     });
@@ -278,8 +285,8 @@ void SessionEngine::openAudioFile (std::function<void (var)> complete)
                 emitError ("decode_failed", r.error.isNotEmpty() ? r.error : juce::String ("That file couldn't be read."));
                 return;
             }
-            so::analysis::BeatGrid grid;
-            grid.bpm = bpm;
+            const auto grid = so::analysis::chooseFileGrid (r.clip, hostTempo());
+            so::analysis::trimTrailingTail (r.clip, grid);
             analyze (std::move (r.clip), grid, "file", name);
         });
     });

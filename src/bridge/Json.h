@@ -21,4 +21,10 @@ juce::var suggestions (const std::vector<reharm::Suggestion>& list, std::uint64_
 juce::var object (std::initializer_list<std::pair<const char*, juce::var>> props);
 juce::var ack (bool ok, const juce::String& error = {});
 
+/** Some WebView backends hand JS strings to C++ as Latin-1 decoded UTF-8 ("A\u00e2\u0099\u00ad" for
+    "A\u266d"). Re-decodes such strings; leaves correct strings untouched. Applied to every argument
+    that arrives from the page, recursively through arrays and objects. */
+juce::String repairUtf8 (const juce::String& s);
+juce::var repair (const juce::var& v);
+
 } // namespace so::bridge::json

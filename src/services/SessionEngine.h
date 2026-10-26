@@ -9,6 +9,7 @@
 
 #include <juce_core/juce_core.h>
 #include <juce_events/juce_events.h>
+#include <juce_gui_basics/juce_gui_basics.h>
 
 #include <atomic>
 #include <functional>
@@ -72,6 +73,7 @@ private:
     so::reharm::Settings currentSettings (std::uint64_t seed) const;
     std::set<int> lockedIds() const;
     double sessionBpm() const;
+    std::optional<double> hostTempo() const;
     void runSongBuild (const juce::var& request, juce::String aiJson, bool aiFailed);
 
     SecondOpinionProcessor& processor;
