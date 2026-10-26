@@ -26,9 +26,17 @@ function(so_add_web_ui target)
         message(STATUS "Second Opinion UI: building with ${SO_NPM}")
         set(NPM_STAMP ${CMAKE_BINARY_DIR}/ui/npm-ci.stamp)
 
+        # Xcode and IDEs often build with a minimal PATH (no Homebrew), and npm needs `node` on PATH.
+        # Pin the folder npm was found in, as seen at configure time.
+        set(NPM_RUN ${SO_NPM})
+        if(NOT WIN32)
+            get_filename_component(SO_NODE_DIR "${SO_NPM}" DIRECTORY)
+            set(NPM_RUN ${CMAKE_COMMAND} -E env "PATH=${SO_NODE_DIR}:$ENV{PATH}" ${SO_NPM})
+        endif()
+
         add_custom_command(
             OUTPUT ${NPM_STAMP}
-            COMMAND ${SO_NPM} ci --no-audit --no-fund
+            COMMAND ${NPM_RUN} ci --no-audit --no-fund
             COMMAND ${CMAKE_COMMAND} -E touch ${NPM_STAMP}
             WORKING_DIRECTORY ${UI_DIR}
             DEPENDS ${UI_DIR}/package-lock.json
@@ -37,7 +45,7 @@ function(so_add_web_ui target)
 
         add_custom_command(
             OUTPUT ${UI_ZIP}
-            COMMAND ${SO_NPM} run build
+            COMMAND ${NPM_RUN} run build
             COMMAND ${CMAKE_COMMAND} -DDIR=${UI_DIST} -DOUT=${UI_ZIP} -P ${CMAKE_SOURCE_DIR}/cmake/ZipDir.cmake
             WORKING_DIRECTORY ${UI_DIR}
             DEPENDS ${NPM_STAMP} ${UI_SOURCES}

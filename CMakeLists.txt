@@ -14,6 +14,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
+# Sources contain UTF-8 literals (♭ ♯ ° ø Δ); make MSVC read them as UTF-8.
+add_compile_options($<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
+
 option(SO_BUILD_TESTS "Build unit and real-time safety tests" ON)
 option(SO_ENABLE_AAX "Build the AAX format (later; needs the Avid SDK and PACE)" OFF)
 option(SO_COPY_PLUGIN "Copy the plugin to the system plugin folder after building" OFF)
