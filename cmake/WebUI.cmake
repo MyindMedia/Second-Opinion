@@ -11,7 +11,11 @@ function(so_add_web_ui target)
     set(UI_DIST ${UI_DIR}/dist)
     set(UI_ZIP ${CMAKE_BINARY_DIR}/ui/ui.zip)
 
-    find_program(SO_NPM NAMES npm npm.cmd)
+    if(WIN32)
+        find_program(SO_NPM NAMES npm.cmd npm)
+    else()
+        find_program(SO_NPM NAMES npm npm.cmd)
+    endif()
 
     file(GLOB_RECURSE UI_SOURCES CONFIGURE_DEPENDS
         ${UI_DIR}/src/*
@@ -29,7 +33,11 @@ function(so_add_web_ui target)
         # Xcode and IDEs often build with a minimal PATH (no Homebrew), and npm needs `node` on PATH.
         # Pin the folder npm was found in, as seen at configure time.
         set(NPM_RUN ${SO_NPM})
-        if(NOT WIN32)
+        if(WIN32)
+            # npm is a .cmd script. Visual Studio runs custom commands as one batch file, and calling a
+            # .cmd without `call` ends that batch, so the commands after npm (zip, stamp) never ran.
+            set(NPM_RUN cmd /c ${SO_NPM})
+        else()
             get_filename_component(SO_NODE_DIR "${SO_NPM}" DIRECTORY)
             set(NPM_RUN ${CMAKE_COMMAND} -E env "PATH=${SO_NODE_DIR}:$ENV{PATH}" ${SO_NPM})
         endif()
